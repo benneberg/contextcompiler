@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-llm-context-setup.py — Smart LLM Context Generator with Incremental Updates
-
-Drop this into any repo and run it, or install as a tool.
+llm-context-setup.py - Smart LLM Context Generator with Incremental Updates
 
 Features:
 - Auto-detects project type and languages
@@ -11,6 +9,8 @@ Features:
 - Multiple operation modes: full, quick, watch
 - Auto-detects conventions for enhanced CLAUDE.md
 - Database schema extraction
+- Security modes: offline, private-ai, public-ai
+- Symbol indexing for navigation
 - Zero required dependencies for core functionality
 
 Usage:
@@ -18,8 +18,9 @@ Usage:
     python3 llm-context-setup.py --quick-update     # Fast incremental update
     python3 llm-context-setup.py --watch            # Watch mode
     python3 llm-context-setup.py --force            # Force full regeneration
+    python3 llm-context-setup.py --doctor           # Diagnostics
 
-Version: 0.3.0
+Version: 0.4.0
 """
 
 import subprocess
@@ -31,80 +32,259 @@ import ast
 import hashlib
 import time
 import threading
+import fnmatch
+import argparse
 from pathlib import Path
-from typing import Optional, Literal, Any
+from typing import Optional, Literal, Any, Tuple, List, Dict, Set
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from collections import defaultdict
 
-# ──────────────────────────────────────────────
-# Version & Metadata
-# ──────────────────────────────────────────────
 
-VERSION = "0.3.0"
-MANIFEST_VERSION = "3"
+VERSION = "0.4.0"
+MANIFEST_VERSION = "4"
 
-# ──────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────
+
+BINARY_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".bmp",
+    ".pdf", ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".obj",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".mp3", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm",
+    ".pyc", ".pyo", ".class", ".o", ".a", ".lib",
+    ".sqlite", ".db", ".sqlite3",
+    ".ico", ".icns",
+    ".DS_Store",
+}
+
+
+EXCLUDE_DIRS = {
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    ".env",
+    "dist",
+    "build",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".next",
+    ".nuxt",
+    "target",
+    ".terraform",
+    "vendor",
+    "coverage",
+    ".coverage",
+    "htmlcov",
+    ".idea",
+    ".vscode",
+    "eggs",
+    ".eggs",
+    "*.egg-info",
+    ".cache",
+    ".parcel-cache",
+    ".turbo",
+}
+
+
+SENSITIVE_PATTERNS = [
+    "**/.env",
+    "**/.env.*",
+    "**/secrets/**",
+    "**/certs/**",
+    "**/keys/**",
+    "**/credentials/**",
+    "**/*_key",
+    "**/*_secret",
+    "**/*.pem",
+    "**/*.key",
+]
+
 
 UpdateStrategy = Literal["always", "if-changed", "if-missing", "never"]
+SecurityMode = Literal["offline", "private-ai", "public-ai"]
 
-DEFAULT_CONFIG = {
-    "version": MANIFEST_VERSION,
-    "output_dir": ".llm-context",
-    "exclude_patterns": [
-        ".git", "__pycache__", "node_modules", ".venv", "venv",
-        "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
-        "*.pyc", "*.pyo", "*.egg-info", ".DS_Store", "*.lock",
-        "migrations/versions", "coverage", ".coverage",
-        "*.min.js", "*.min.css", "*.map", ".next", ".nuxt",
-        "target/debug", "target/release",
-    ],
-    "max_file_size_kb": 100,
-    "max_tree_depth": 6,
-    "max_files_in_tree": 500,
-    "generate": {
-        "tree": True,
-        "schemas": True,
-        "public_api": True,
-        "routes": True,
-        "dependencies": True,
-        "dependency_graph_mermaid": True,
-        "db_schema": True,
-        "api_contract": True,
-        "env_shape": True,
-        "recent_activity": True,
-        "claude_md_scaffold": True,
-        "architecture_md_scaffold": True,
-        "module_summaries": False,
-    },
-    "llm_summaries": {
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-20250514",
-        "max_modules": 30,
-        "min_file_size_bytes": 300
-    },
-    "update_strategies": {
-        "tree.txt": "always",
-        "recent-commits.txt": "always",
-        "recent-changes.txt": "always",
-        "schemas-extracted.py": "if-changed",
-        "types-extracted.ts": "if-changed",
-        "rust-types.rs": "if-changed",
-        "go-types.go": "if-changed",
-        "csharp-types.cs": "if-changed",
-        "public-api.txt": "if-changed",
-        "routes.txt": "if-changed",
-        "dependency-graph.txt": "if-changed",
-        "dependency-graph.md": "if-changed",
-        "db-schema.sql": "if-changed",
-        "api-contract.md": "if-changed",
-        "modules/*.md": "if-changed",
-        "../CLAUDE.md": "if-missing",
-        "../ARCHITECTURE.md": "if-missing",
+
+def get_default_config():
+    """Return default configuration dictionary."""
+    return {
+        "version": MANIFEST_VERSION,
+        "output_dir": ".llm-context",
+        "security": {
+            "mode": "offline",
+            "redact_secrets": True,
+            "audit_log": True,
+        },
+        "max_file_size_kb": 100,
+        "max_tree_depth": 6,
+        "max_files_in_tree": 500,
+        "generate": {
+            "tree": True,
+            "schemas": True,
+            "public_api": True,
+            "routes": True,
+            "dependencies": True,
+            "dependency_graph_mermaid": True,
+            "db_schema": True,
+            "api_contract": True,
+            "env_shape": True,
+            "recent_activity": True,
+            "claude_md_scaffold": True,
+            "architecture_md_scaffold": True,
+            "module_summaries": False,
+            "symbol_index": True,
+            "entry_points": True,
+        },
+        "llm_summaries": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-20250514",
+            "max_modules": 30,
+            "min_file_size_bytes": 300,
+        },
+        "update_strategies": {
+            "tree.txt": "always",
+            "recent-commits.txt": "always",
+            "recent-changes.txt": "always",
+            "schemas-extracted.py": "if-changed",
+            "types-extracted.ts": "if-changed",
+            "rust-types.rs": "if-changed",
+            "go-types.go": "if-changed",
+            "csharp-types.cs": "if-changed",
+            "public-api.txt": "if-changed",
+            "routes.txt": "if-changed",
+            "dependency-graph.txt": "if-changed",
+            "dependency-graph.md": "if-changed",
+            "db-schema.txt": "if-changed",
+            "api-contract.md": "if-changed",
+            "symbol-index.json": "if-changed",
+            "entry-points.json": "if-changed",
+            "modules/*.md": "if-changed",
+            "../CLAUDE.md": "if-missing",
+            "../ARCHITECTURE.md": "if-missing",
+        },
     }
-}
+
+
+def is_binary_file(path: Path) -> bool:
+    """Check if a file is binary."""
+    if path.suffix.lower() in BINARY_EXTENSIONS:
+        return True
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(1024)
+        return b"\0" in chunk
+    except Exception:
+        return True
+
+
+def safe_read_text(path: Path) -> Optional[str]:
+    """Safely read a text file with UTF-8 encoding."""
+    if is_binary_file(path):
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
+def safe_write_text(path: Path, content: str) -> bool:
+    """Safely write text to a file with UTF-8 encoding."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def get_timestamp() -> str:
+    """Get current UTC timestamp as string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def human_readable_size(size_bytes: int) -> str:
+    """Convert bytes to human readable string."""
+    for unit in ["B", "KB", "MB"]:
+        if size_bytes < 1024:
+            if unit == "B":
+                return f"{size_bytes:.0f}{unit}"
+            return f"{size_bytes:.1f}{unit}"
+        size_bytes = size_bytes / 1024
+    return f"{size_bytes:.1f}GB"
+
+
+def should_skip_path(path: Path) -> bool:
+    """Check if path should be skipped based on exclusion rules."""
+    path_parts = set(path.parts)
+    if path_parts & EXCLUDE_DIRS:
+        return True
+    path_str = str(path)
+    for pattern in SENSITIVE_PATTERNS:
+        if fnmatch.fnmatch(path_str, pattern):
+            return True
+    return False
+
+
+def hash_file_quick(path: Path) -> str:
+    """Generate a quick hash of a file."""
+    try:
+        size = path.stat().st_size
+        if size > 100000:
+            with open(path, "rb") as f:
+                start = f.read(10000)
+                f.seek(-10000, 2)
+                end = f.read(10000)
+                data = start + end
+        else:
+            data = path.read_bytes()
+        return hashlib.md5(data).hexdigest()[:12]
+    except Exception:
+        return ""
+
+
+def deep_merge(base: dict, override: dict) -> None:
+    """Deep merge override into base dictionary."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+
+
+def load_config(root: Path) -> dict:
+    """Load configuration from file or return defaults."""
+    config = get_default_config()
+    
+    yaml_config = root / "llm-context.yml"
+    if yaml_config.exists():
+        try:
+            import yaml
+            content = safe_read_text(yaml_config)
+            if content:
+                user_config = yaml.safe_load(content)
+                if user_config:
+                    deep_merge(config, user_config)
+                print(f"  Loaded config from {yaml_config}")
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"  Warning: Could not parse {yaml_config}: {e}")
+        return config
+    
+    json_config = root / "llm-context.json"
+    if json_config.exists():
+        try:
+            content = safe_read_text(json_config)
+            if content:
+                user_config = json.loads(content)
+                deep_merge(config, user_config)
+                print(f"  Loaded config from {json_config}")
+        except Exception as e:
+            print(f"  Warning: Could not parse {json_config}: {e}")
+    
+    return config
 
 
 @dataclass
@@ -113,41 +293,48 @@ class FileManifestEntry:
     hash: str
     size: int
     generated_at: str
-    source_files: list[str] = field(default_factory=list)
-    source_hashes: list[str] = field(default_factory=list)
-    strategy: UpdateStrategy = "always"
+    source_files: List[str] = field(default_factory=list)
+    source_hashes: List[str] = field(default_factory=list)
+    strategy: str = "always"
 
 
 @dataclass
 class GenerationManifest:
-    """Tracks what was generated and when, for incremental updates."""
+    """Tracks what was generated and when."""
     version: str
     generated_at: str
     project_fingerprint: str
-    files: dict[str, dict[str, Any]]
+    files: Dict[str, Dict[str, Any]]
     
     @classmethod
-    def load(cls, path: Path) -> Optional['GenerationManifest']:
-        """Load existing manifest."""
-        manifest_file = path / ".llm-context" / "manifest.json"
+    def load(cls, root: Path) -> Optional["GenerationManifest"]:
+        """Load manifest from disk."""
+        manifest_file = root / ".llm-context" / "manifest.json"
         if not manifest_file.exists():
             return None
         try:
-            data = json.loads(manifest_file.read_text())
-            if data.get("version") != MANIFEST_VERSION:
-                print(f"  ⚠ Manifest version mismatch (found {data.get('version')}, expected {MANIFEST_VERSION})")
-                print("    Running full regeneration...")
+            content = safe_read_text(manifest_file)
+            if not content:
                 return None
-            return cls(**data)
+            data = json.loads(content)
+            if data.get("version") != MANIFEST_VERSION:
+                print(f"  Manifest version mismatch, will regenerate")
+                return None
+            return cls(
+                version=data["version"],
+                generated_at=data["generated_at"],
+                project_fingerprint=data["project_fingerprint"],
+                files=data["files"],
+            )
         except Exception as e:
-            print(f"  ⚠ Error loading manifest: {e}")
+            print(f"  Warning: Could not load manifest: {e}")
             return None
     
-    def save(self, path: Path):
+    def save(self, root: Path) -> None:
         """Save manifest to disk."""
-        manifest_file = path / ".llm-context" / "manifest.json"
-        manifest_file.parent.mkdir(parents=True, exist_ok=True)
-        manifest_file.write_text(json.dumps(asdict(self), indent=2))
+        manifest_file = root / ".llm-context" / "manifest.json"
+        data = asdict(self)
+        safe_write_text(manifest_file, json.dumps(data, indent=2))
     
     def get_entry(self, filename: str) -> Optional[FileManifestEntry]:
         """Get manifest entry for a file."""
@@ -156,7 +343,7 @@ class GenerationManifest:
             return None
         return FileManifestEntry(**entry_dict)
     
-    def set_entry(self, filename: str, entry: FileManifestEntry):
+    def set_entry(self, filename: str, entry: FileManifestEntry) -> None:
         """Set manifest entry for a file."""
         self.files[filename] = asdict(entry)
 
@@ -166,84 +353,93 @@ class ProjectInfo:
     """Auto-detected project metadata."""
     root: Path
     name: str = ""
-    languages: list[str] = field(default_factory=list)
+    languages: List[str] = field(default_factory=list)
     framework: str = ""
     package_manager: str = ""
     has_docker: bool = False
     has_ci: bool = False
     has_tests: bool = False
-    entry_points: list[str] = field(default_factory=list)
+    entry_points: List[str] = field(default_factory=list)
     description: str = ""
     python_version: str = ""
     node_version: str = ""
 
 
-# ──────────────────────────────────────────────
-# Utility functions
-# ──────────────────────────────────────────────
-
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-
-def _human_size(size: int) -> str:
-    for unit in ["B", "KB", "MB"]:
-        if size < 1024:
-            return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
-        size /= 1024
-    return f"{size:.1f}GB"
-
-
-def _should_skip_path(path: Path) -> bool:
-    skip_parts = {
-        "node_modules", ".venv", "venv", "__pycache__",
-        "dist", "build", ".git", "migrations", ".tox",
-        ".mypy_cache", ".pytest_cache", "coverage",
-        ".next", ".nuxt", "target",
-    }
-    return bool(set(path.parts) & skip_parts)
-
-
-def load_config(root: Path) -> dict:
-    config = DEFAULT_CONFIG.copy()
+class SecurityManager:
+    """Manage security settings and audit logging."""
     
-    config_file = root / "llm-context.yml"
-    if config_file.exists():
-        try:
-            import yaml
-            with open(config_file) as f:
-                user_config = yaml.safe_load(f)
-            if user_config:
-                _deep_merge(config, user_config)
-            print(f"  ✓ Loaded config from {config_file}")
-            return config
-        except ImportError:
-            pass
+    def __init__(self, root: Path, config: dict):
+        self.root = root
+        self.config = config
+        security_config = config.get("security", {})
+        self.mode = security_config.get("mode", "offline")
+        self.audit_enabled = security_config.get("audit_log", True)
+        self.redact_secrets = security_config.get("redact_secrets", True)
     
-    config_file = root / "llm-context.json"
-    if config_file.exists():
+    def is_ai_enabled(self) -> bool:
+        """Check if AI features are enabled."""
+        return self.mode in ["private-ai", "public-ai"]
+    
+    def log_audit(self, action: str, details: dict) -> None:
+        """Log an audit event."""
+        if not self.audit_enabled:
+            return
+        audit_file = self.root / ".llm-context" / "audit.log"
+        entry = {
+            "timestamp": get_timestamp(),
+            "action": action,
+            "mode": self.mode,
+        }
+        entry.update(details)
         try:
-            with open(config_file) as f:
-                user_config = json.load(f)
-            _deep_merge(config, user_config)
-            print(f"  ✓ Loaded config from {config_file}")
+            existing = ""
+            if audit_file.exists():
+                existing = safe_read_text(audit_file) or ""
+            new_entry = json.dumps(entry) + "\n"
+            safe_write_text(audit_file, existing + new_entry)
         except Exception:
             pass
     
-    return config
-
-
-def _deep_merge(base: dict, override: dict):
-    for key, value in override.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            _deep_merge(base[key], value)
+    def redact_content(self, content: str) -> str:
+        """Redact sensitive patterns from content."""
+        if not self.redact_secrets:
+            return content
+        patterns = [
+            (r"(API[_-]?KEY\s*=\s*)[\"']?[^\"'\s]+[\"']?", r"\1****"),
+            (r"(PASSWORD\s*=\s*)[\"']?[^\"'\s]+[\"']?", r"\1****"),
+            (r"(SECRET\s*=\s*)[\"']?[^\"'\s]+[\"']?", r"\1****"),
+            (r"(TOKEN\s*=\s*)[\"']?[^\"'\s]+[\"']?", r"\1****"),
+            (r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", "Bearer ****"),
+        ]
+        result = content
+        for pattern, replacement in patterns:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        return result
+    
+    def print_status(self) -> None:
+        """Print security status."""
+        print("")
+        print("=" * 60)
+        print("  Security Status")
+        print("=" * 60)
+        print(f"  Mode: {self.mode.upper()}")
+        if self.mode == "offline":
+            print("  External APIs: DISABLED")
+            print("  AI Features: DISABLED")
+        elif self.mode == "private-ai":
+            print("  External APIs: ALLOWED (Private infrastructure)")
+            print("  AI Features: ENABLED")
         else:
-            base[key] = value
+            print("  External APIs: ALLOWED (Public services)")
+            print("  AI Features: ENABLED")
+            print("  WARNING: Code may be sent to external AI services")
+        redact_status = "ENABLED" if self.redact_secrets else "DISABLED"
+        audit_status = "ENABLED" if self.audit_enabled else "DISABLED"
+        print(f"  Secret Redaction: {redact_status}")
+        print(f"  Audit Logging: {audit_status}")
+        print("=" * 60)
+        print("")
 
-
-# ──────────────────────────────────────────────
-# Smart Update Manager
-# ──────────────────────────────────────────────
 
 class SmartUpdater:
     """Manages incremental updates based on file changes."""
@@ -252,20 +448,56 @@ class SmartUpdater:
         self.root = root
         self.config = config
         self.force = force
-        self.old_manifest = None if force else GenerationManifest.load(root)
+        if force:
+            self.old_manifest = None
+        else:
+            self.old_manifest = GenerationManifest.load(root)
         self.new_manifest = GenerationManifest(
             version=MANIFEST_VERSION,
-            generated_at=_now(),
-            project_fingerprint=self._compute_project_fingerprint(),
-            files={}
+            generated_at=get_timestamp(),
+            project_fingerprint=self._compute_fingerprint(),
+            files={},
         )
-        self.stats = {
-            "regenerated": 0,
-            "skipped": 0,
-            "new": 0
-        }
+        self.stats = {"regenerated": 0, "skipped": 0, "new": 0}
     
-    def should_regenerate(self, filepath: str, source_files: list[Path] = None) -> tuple[bool, str]:
+    def _compute_fingerprint(self) -> str:
+        """Compute project fingerprint from key files."""
+        key_files = [
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "requirements.txt",
+            "poetry.lock",
+            "package-lock.json",
+            ".env.example",
+            "docker-compose.yml",
+        ]
+        parts = []
+        for filename in key_files:
+            path = self.root / filename
+            if path.exists():
+                file_hash = hash_file_quick(path)
+                parts.append(f"{filename}:{file_hash}")
+        combined = "|".join(sorted(parts))
+        return hashlib.md5(combined.encode()).hexdigest()[:16]
+    
+    def _get_strategy(self, filepath: str) -> str:
+        """Get update strategy for a file."""
+        strategies = self.config.get("update_strategies", {})
+        if filepath in strategies:
+            return strategies[filepath]
+        for pattern, strategy in strategies.items():
+            if "*" in pattern:
+                if fnmatch.fnmatch(filepath, pattern):
+                    return strategy
+            elif filepath.endswith(pattern):
+                return strategy
+        return "always"
+    
+    def should_regenerate(
+        self, filepath: str, source_files: List[Path] = None
+    ) -> Tuple[bool, str]:
         """Determine if a file needs regeneration."""
         if self.force:
             return True, "force mode"
@@ -294,112 +526,64 @@ class SmartUpdater:
             
             if source_files:
                 old_hashes = old_entry.source_hashes
-                new_hashes = [self._hash_file(f) for f in source_files]
-                
+                new_hashes = [hash_file_quick(f) for f in source_files]
                 if new_hashes != old_hashes:
                     return True, "source files changed"
             
-            if self.old_manifest.project_fingerprint != self.new_manifest.project_fingerprint:
+            old_fp = self.old_manifest.project_fingerprint
+            new_fp = self.new_manifest.project_fingerprint
+            if old_fp != new_fp:
                 return True, "project dependencies changed"
             
             return False, "up to date"
         
         return True, "default"
     
-    def mark_generated(self, filepath: str, content: str, source_files: list[Path] = None, is_new: bool = False):
+    def mark_generated(
+        self,
+        filepath: str,
+        content: str,
+        source_files: List[Path] = None,
+        is_new: bool = False,
+    ) -> None:
         """Record that a file was generated."""
         strategy = self._get_strategy(filepath)
-        
+        src_files = source_files or []
         entry = FileManifestEntry(
             hash=hashlib.sha256(content.encode()).hexdigest()[:16],
             size=len(content),
-            generated_at=_now(),
-            source_files=[str(f.relative_to(self.root)) for f in (source_files or [])],
-            source_hashes=[self._hash_file(f) for f in (source_files or [])],
-            strategy=strategy
+            generated_at=get_timestamp(),
+            source_files=[str(f.relative_to(self.root)) for f in src_files],
+            source_hashes=[hash_file_quick(f) for f in src_files],
+            strategy=strategy,
         )
-        
         self.new_manifest.set_entry(filepath, entry)
-        
         if is_new:
             self.stats["new"] += 1
         else:
             self.stats["regenerated"] += 1
     
-    def mark_skipped(self, filepath: str):
-        """Record that a file was skipped (up to date)."""
+    def mark_skipped(self, filepath: str) -> None:
+        """Record that a file was skipped."""
         if self.old_manifest:
             old_entry = self.old_manifest.get_entry(filepath)
             if old_entry:
                 self.new_manifest.set_entry(filepath, old_entry)
-        
         self.stats["skipped"] += 1
     
-    def _get_strategy(self, filepath: str) -> UpdateStrategy:
-        """Get update strategy for a file."""
-        strategies = self.config.get("update_strategies", {})
-        
-        if filepath in strategies:
-            return strategies[filepath]
-        
-        for pattern, strategy in strategies.items():
-            if "*" in pattern:
-                import fnmatch
-                if fnmatch.fnmatch(filepath, pattern):
-                    return strategy
-            elif filepath.endswith(pattern):
-                return strategy
-        
-        return "always"
-    
-    def _hash_file(self, path: Path) -> str:
-        """Fast file hash."""
-        try:
-            size = path.stat().st_size
-            if size > 100_000:
-                with open(path, 'rb') as f:
-                    start = f.read(10000)
-                    f.seek(-10000, 2)
-                    end = f.read(10000)
-                    return hashlib.md5(start + end).hexdigest()[:12]
-            else:
-                return hashlib.md5(path.read_bytes()).hexdigest()[:12]
-        except Exception:
-            return ""
-    
-    def _compute_project_fingerprint(self) -> str:
-        """Hash of key project files to detect major changes."""
-        key_files = [
-            "pyproject.toml", "package.json", "Cargo.toml", "go.mod",
-            "requirements.txt", "poetry.lock", "package-lock.json",
-            ".env.example", "docker-compose.yml"
-        ]
-        
-        fingerprint_parts = []
-        for filename in key_files:
-            path = self.root / filename
-            if path.exists():
-                file_hash = self._hash_file(path)
-                fingerprint_parts.append(f"{filename}:{file_hash}")
-        
-        combined = "|".join(sorted(fingerprint_parts))
-        return hashlib.md5(combined.encode()).hexdigest()[:16]
-    
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print update statistics."""
         total = sum(self.stats.values())
-        print(f"\n{'─' * 60}")
-        print(f"  Update Summary:")
-        print(f"  • Regenerated: {self.stats['regenerated']}")
-        print(f"  • Skipped (up to date): {self.stats['skipped']}")
-        print(f"  • New files: {self.stats['new']}")
-        print(f"  • Total: {total}")
-        print(f"{'─' * 60}\n")
+        print("")
+        print("-" * 60)
+        print("  Update Summary:")
+        print(f"  - Regenerated: {self.stats['regenerated']}")
+        print(f"  - Skipped (up to date): {self.stats['skipped']}")
+        print(f"  - New files: {self.stats['new']}")
+        print(f"  - Total: {total}")
+        print("-" * 60)
+        print("")
 
-
-# ──────────────────────────────────────────────
-# Progress Indicator
-# ──────────────────────────────────────────────
 
 class ProgressIndicator:
     """Simple progress indicator for terminal."""
@@ -410,36 +594,40 @@ class ProgressIndicator:
         self.description = description
         self.start_time = time.time()
     
-    def update(self, increment: int = 1):
+    def update(self, increment: int = 1) -> None:
         """Update progress."""
         self.current += increment
-        percent = (self.current / self.total) * 100 if self.total > 0 else 0
-        elapsed = time.time() - self.start_time
+        if self.total > 0:
+            percent = (self.current / self.total) * 100
+        else:
+            percent = 0
         
+        elapsed = time.time() - self.start_time
         if self.current > 0:
             eta = (elapsed / self.current) * (self.total - self.current)
-            eta_str = f"ETA: {int(eta)}s" if eta > 0 else "Done"
+            if eta > 0:
+                eta_str = f"ETA: {int(eta)}s"
+            else:
+                eta_str = "Done"
         else:
             eta_str = ""
         
         bar_length = 30
         filled = int(bar_length * percent / 100)
-        bar = "█" * filled + "░" * (bar_length - filled)
+        bar = "#" * filled + "-" * (bar_length - filled)
         
-        print(f"\r  {self.description}: [{bar}] {percent:5.1f}% ({self.current}/{self.total}) {eta_str}", end="", flush=True)
+        line = f"\r  {self.description}: [{bar}] {percent:5.1f}% "
+        line += f"({self.current}/{self.total}) {eta_str}"
+        print(line, end="", flush=True)
     
-    def finish(self):
+    def finish(self) -> None:
         """Mark as complete."""
-        print()
+        print("")
 
-
-# ──────────────────────────────────────────────
-# Project Detection
-# ──────────────────────────────────────────────
 
 class ProjectDetector:
-    """Detect project type, language, framework, and conventions."""
-
+    """Detect project type, languages, and framework."""
+    
     FRAMEWORK_INDICATORS = {
         "fastapi": ["fastapi", "from fastapi"],
         "django": ["django", "DJANGO_SETTINGS_MODULE"],
@@ -460,132 +648,176 @@ class ProjectDetector:
         "echo": ["github.com/labstack/echo"],
         "fiber": ["github.com/gofiber/fiber"],
     }
-
+    
     def __init__(self, root: Path):
         self.root = root
-
+    
     def detect(self) -> ProjectInfo:
+        """Detect project information."""
         info = ProjectInfo(root=self.root)
         info.name = self.root.name
         info.languages = self._detect_languages()
         self._detect_from_configs(info)
-        info.framework = self._detect_framework(info)
-        info.has_docker = (self.root / "Dockerfile").exists() or (self.root / "docker-compose.yml").exists()
-        info.has_ci = any([
-            (self.root / ".github/workflows").exists(),
-            (self.root / ".gitlab-ci.yml").exists(),
-            (self.root / "Jenkinsfile").exists(),
-            (self.root / ".circleci").exists(),
-        ])
-        info.has_tests = any([
-            (self.root / "tests").exists(),
-            (self.root / "test").exists(),
-            (self.root / "__tests__").exists(),
-            (self.root / "spec").exists(),
-        ])
+        info.framework = self._detect_framework()
+        info.has_docker = self._has_docker()
+        info.has_ci = self._has_ci()
+        info.has_tests = self._has_tests()
         return info
-
-    def _detect_languages(self) -> list[str]:
+    
+    def _detect_languages(self) -> List[str]:
+        """Detect programming languages used."""
         extensions = {}
-        for f in self._walk_files():
+        for f in self._walk_files(max_files=500):
             ext = f.suffix.lower()
             extensions[ext] = extensions.get(ext, 0) + 1
-
+        
         lang_map = {
-            ".py": "python", ".js": "javascript", ".ts": "typescript",
-            ".tsx": "typescript", ".jsx": "javascript", ".rs": "rust",
-            ".go": "go", ".java": "java", ".cs": "csharp", ".rb": "ruby",
-            ".php": "php", ".swift": "swift", ".kt": "kotlin",
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".jsx": "javascript",
+            ".rs": "rust",
+            ".go": "go",
+            ".java": "java",
+            ".cs": "csharp",
+            ".rb": "ruby",
+            ".php": "php",
+            ".swift": "swift",
+            ".kt": "kotlin",
         }
-
+        
         langs = []
-        for ext, count in sorted(extensions.items(), key=lambda x: -x[1]):
+        sorted_exts = sorted(extensions.items(), key=lambda x: -x[1])
+        for ext, count in sorted_exts:
             if ext in lang_map and count >= 2:
-                langs.append(lang_map[ext])
-
+                lang = lang_map[ext]
+                if lang not in langs:
+                    langs.append(lang)
+        
         return langs[:5]
-
-    def _detect_from_configs(self, info: ProjectInfo):
-        if (self.root / "pyproject.toml").exists():
+    
+    def _detect_from_configs(self, info: ProjectInfo) -> None:
+        """Detect info from configuration files."""
+        pyproject = self.root / "pyproject.toml"
+        if pyproject.exists():
             info.package_manager = "poetry/pip"
-            try:
-                content = (self.root / "pyproject.toml").read_text()
-                if match := re.search(r'description\s*=\s*"([^"]*)"', content):
-                    info.description = match.group(1)
-                if match := re.search(r'python\s*=\s*"([^"]*)"', content):
-                    info.python_version = match.group(1)
-            except Exception:
-                pass
-
-        if (self.root / "package.json").exists():
+            content = safe_read_text(pyproject) or ""
+            match = re.search(r'description\s*=\s*"([^"]*)"', content)
+            if match:
+                info.description = match.group(1)
+            match = re.search(r'python\s*=\s*"([^"]*)"', content)
+            if match:
+                info.python_version = match.group(1)
+        
+        package_json = self.root / "package.json"
+        if package_json.exists():
             info.package_manager = "npm/yarn"
-            try:
-                pkg = json.loads((self.root / "package.json").read_text())
-                info.description = pkg.get("description", "")
-                if "main" in pkg:
-                    info.entry_points.append(pkg["main"])
-            except Exception:
-                pass
-
-        if (self.root / "Cargo.toml").exists():
-            info.package_manager = "cargo"
-
-        if (self.root / "go.mod").exists():
-            info.package_manager = "go modules"
-
-    def _detect_framework(self, info: ProjectInfo) -> str:
-        """Scan key files for framework imports."""
-        files_to_scan = list(self._walk_files(max_files=100))
-        content_sample = ""
-
-        for f in files_to_scan[:50]:
-            try:
-                if f.stat().st_size < 50_000:
-                    content_sample += f.read_text(errors="ignore")
-            except Exception:
-                continue
-
-        for dep_file in ["requirements.txt", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]:
-            p = self.root / dep_file
-            if p.exists():
+            content = safe_read_text(package_json)
+            if content:
                 try:
-                    content_sample += p.read_text()
+                    pkg = json.loads(content)
+                    info.description = pkg.get("description", "")
+                    main = pkg.get("main")
+                    if main:
+                        info.entry_points.append(main)
                 except Exception:
                     pass
-
+        
+        if (self.root / "Cargo.toml").exists():
+            info.package_manager = "cargo"
+        
+        if (self.root / "go.mod").exists():
+            info.package_manager = "go modules"
+    
+    def _detect_framework(self) -> str:
+        """Detect frameworks used."""
+        files_to_scan = list(self._walk_files(max_files=100))
+        content_sample = ""
+        
+        for f in files_to_scan[:50]:
+            try:
+                if f.stat().st_size < 50000:
+                    text = safe_read_text(f)
+                    if text:
+                        content_sample += text
+            except Exception:
+                continue
+        
+        dep_files = [
+            "requirements.txt",
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+        ]
+        for dep_file in dep_files:
+            path = self.root / dep_file
+            if path.exists():
+                text = safe_read_text(path)
+                if text:
+                    content_sample += text
+        
         detected = []
+        content_lower = content_sample.lower()
         for framework, indicators in self.FRAMEWORK_INDICATORS.items():
             for indicator in indicators:
-                if indicator.lower() in content_sample.lower():
+                if indicator.lower() in content_lower:
                     detected.append(framework)
                     break
-
-        return ", ".join(detected) if detected else "unknown"
-
+        
+        if detected:
+            return ", ".join(detected)
+        return "unknown"
+    
+    def _has_docker(self) -> bool:
+        """Check for Docker files."""
+        return (
+            (self.root / "Dockerfile").exists()
+            or (self.root / "docker-compose.yml").exists()
+            or (self.root / "docker-compose.yaml").exists()
+        )
+    
+    def _has_ci(self) -> bool:
+        """Check for CI/CD configuration."""
+        return (
+            (self.root / ".github" / "workflows").exists()
+            or (self.root / ".gitlab-ci.yml").exists()
+            or (self.root / "Jenkinsfile").exists()
+            or (self.root / ".circleci").exists()
+        )
+    
+    def _has_tests(self) -> bool:
+        """Check for test directories."""
+        return (
+            (self.root / "tests").exists()
+            or (self.root / "test").exists()
+            or (self.root / "__tests__").exists()
+            or (self.root / "spec").exists()
+        )
+    
     def _walk_files(self, max_files: int = 1000):
+        """Walk files in project, respecting exclusions."""
         count = 0
-        exclude = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".tox"}
         for dirpath, dirnames, filenames in os.walk(self.root):
-            dirnames[:] = [d for d in dirnames if d not in exclude]
-            for f in filenames:
+            dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+            for filename in filenames:
                 if count >= max_files:
                     return
-                yield Path(dirpath) / f
-                count += 1
+                filepath = Path(dirpath) / filename
+                if not should_skip_path(filepath):
+                    yield filepath
+                    count += 1
 
-
-# ──────────────────────────────────────────────
-# CLAUDE.md Enhancer with Auto-Detection
-# ──────────────────────────────────────────────
 
 class ClaudeMdEnhancer:
-    """Auto-detect conventions and patterns to pre-fill CLAUDE.md."""
+    """Auto-detect conventions for enhanced CLAUDE.md."""
     
     def __init__(self, root: Path):
         self.root = root
     
-    def detect_conventions(self, project: ProjectInfo) -> dict:
-        """Auto-detect project conventions."""
+    def detect_conventions(self) -> dict:
+        """Detect project conventions."""
         return {
             "error_handling": self._detect_error_pattern(),
             "testing_framework": self._detect_test_framework(),
@@ -598,81 +830,85 @@ class ClaudeMdEnhancer:
         }
     
     def _detect_error_pattern(self) -> str:
-        """Detect: exceptions vs Result pattern vs error codes."""
-        samples = list(self.root.rglob("*.py"))[:20]
-        
+        """Detect error handling pattern."""
+        py_files = list(self.root.rglob("*.py"))[:20]
         result_count = 0
         exception_count = 0
         
-        for f in samples:
-            if _should_skip_path(f):
+        for f in py_files:
+            if should_skip_path(f):
                 continue
-            try:
-                content = f.read_text(errors="ignore")
-                if "Result[" in content or "from result import" in content:
-                    result_count += 1
-                if "raise " in content:
-                    exception_count += content.count("raise ")
-            except Exception:
+            content = safe_read_text(f)
+            if not content:
                 continue
+            if "Result[" in content or "from result import" in content:
+                result_count += 1
+            exception_count += content.count("raise ")
         
         if result_count > 5:
-            return "Result pattern (functional error handling) — Use Result[T, E] instead of exceptions for business logic errors"
+            return "Result pattern (functional error handling)"
         elif exception_count > 20:
-            return "Exception-based — Use try/except for error handling"
-        return "Mixed/unclear (TODO: document your error handling strategy)"
+            return "Exception-based (try/except)"
+        return "Mixed/unclear (TODO: document your strategy)"
     
     def _detect_test_framework(self) -> dict:
-        """Detect pytest vs unittest vs jest vs others."""
-        frameworks = {"python": None, "javascript": None}
+        """Detect test frameworks."""
+        frameworks = {}
         
         if (self.root / "pytest.ini").exists():
             frameworks["python"] = "pytest"
         else:
+            pyproject = self.root / "pyproject.toml"
+            if pyproject.exists():
+                content = safe_read_text(pyproject) or ""
+                if "pytest" in content:
+                    frameworks["python"] = "pytest"
+        
+        if not frameworks.get("python"):
             test_files = list(self.root.rglob("test_*.py"))[:5]
             for tf in test_files:
+                content = safe_read_text(tf) or ""
+                if "import pytest" in content:
+                    frameworks["python"] = "pytest"
+                    break
+                if "import unittest" in content:
+                    frameworks["python"] = "unittest"
+                    break
+        
+        package_json = self.root / "package.json"
+        if package_json.exists():
+            content = safe_read_text(package_json)
+            if content:
                 try:
-                    content = tf.read_text(errors="ignore")
-                    if "import pytest" in content:
-                        frameworks["python"] = "pytest"
-                        break
-                    if "import unittest" in content:
-                        frameworks["python"] = "unittest"
-                        break
+                    pkg = json.loads(content)
+                    deps = {}
+                    deps.update(pkg.get("dependencies", {}))
+                    deps.update(pkg.get("devDependencies", {}))
+                    if "jest" in deps:
+                        frameworks["javascript"] = "jest"
+                    elif "vitest" in deps:
+                        frameworks["javascript"] = "vitest"
+                    elif "mocha" in deps:
+                        frameworks["javascript"] = "mocha"
                 except Exception:
-                    continue
+                    pass
         
-        if (self.root / "package.json").exists():
-            try:
-                pkg = json.loads((self.root / "package.json").read_text())
-                deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-                
-                if "jest" in deps:
-                    frameworks["javascript"] = "jest"
-                elif "vitest" in deps:
-                    frameworks["javascript"] = "vitest"
-                elif "mocha" in deps:
-                    frameworks["javascript"] = "mocha"
-                elif "@playwright/test" in deps:
-                    frameworks["javascript"] = "playwright"
-            except Exception:
-                pass
-        
-        return {k: v for k, v in frameworks.items() if v}
+        return frameworks
     
     def _detect_async_usage(self) -> Optional[str]:
-        """Detect if project uses async/await heavily."""
+        """Detect async/await usage."""
         py_files = list(self.root.rglob("*.py"))[:30]
         async_count = 0
         total_functions = 0
         
         for f in py_files:
-            if _should_skip_path(f):
+            if should_skip_path(f):
+                continue
+            content = safe_read_text(f)
+            if not content:
                 continue
             try:
-                content = f.read_text(errors="ignore")
                 tree = ast.parse(content)
-                
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
                         total_functions += 1
@@ -686,78 +922,88 @@ class ClaudeMdEnhancer:
             return None
         
         async_ratio = async_count / total_functions
-        
         if async_ratio > 0.3:
-            return f"Heavy async usage (~{int(async_ratio*100)}% of functions) — Always use async/await, avoid blocking calls"
+            pct = int(async_ratio * 100)
+            return f"Heavy async (~{pct}% of functions)"
         elif async_ratio > 0.1:
-            return "Mixed sync/async — Be careful with blocking calls in async functions"
+            return "Mixed sync/async"
         return None
     
     def _detect_orm(self) -> Optional[str]:
         """Detect ORM/database layer."""
         orms = []
         
-        for indicator_file in ["requirements.txt", "pyproject.toml"]:
-            path = self.root / indicator_file
+        for config_file in ["requirements.txt", "pyproject.toml"]:
+            path = self.root / config_file
             if path.exists():
-                content = path.read_text()
-                if "sqlalchemy" in content.lower():
+                content = (safe_read_text(path) or "").lower()
+                if "sqlalchemy" in content:
                     orms.append("SQLAlchemy")
-                if "django" in content.lower():
+                if "django" in content:
                     orms.append("Django ORM")
-                if "tortoise" in content.lower():
+                if "tortoise" in content:
                     orms.append("Tortoise ORM")
         
-        pkg_json = self.root / "package.json"
-        if pkg_json.exists():
-            try:
-                pkg = json.loads(pkg_json.read_text())
-                deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-                
-                if "typeorm" in deps:
-                    orms.append("TypeORM")
-                if "prisma" in deps:
-                    orms.append("Prisma")
-                if "sequelize" in deps:
-                    orms.append("Sequelize")
-                if "mongoose" in deps:
-                    orms.append("Mongoose")
-            except Exception:
-                pass
+        package_json = self.root / "package.json"
+        if package_json.exists():
+            content = safe_read_text(package_json)
+            if content:
+                try:
+                    pkg = json.loads(content)
+                    deps = {}
+                    deps.update(pkg.get("dependencies", {}))
+                    deps.update(pkg.get("devDependencies", {}))
+                    if "typeorm" in deps:
+                        orms.append("TypeORM")
+                    if "prisma" in deps:
+                        orms.append("Prisma")
+                    if "sequelize" in deps:
+                        orms.append("Sequelize")
+                    if "mongoose" in deps:
+                        orms.append("Mongoose")
+                except Exception:
+                    pass
         
-        return ", ".join(orms) if orms else None
+        if orms:
+            return ", ".join(orms)
+        return None
     
     def _detect_api_style(self) -> str:
-        """Detect REST vs GraphQL vs gRPC."""
+        """Detect API style (REST/GraphQL/gRPC)."""
         styles = []
         
-        if any((self.root / p).exists() for p in ["schema.graphql", "schema.gql"]):
-            styles.append("GraphQL")
+        graphql_files = ["schema.graphql", "schema.gql"]
+        for gf in graphql_files:
+            if (self.root / gf).exists():
+                styles.append("GraphQL")
+                break
         
-        for dep_file in ["requirements.txt", "pyproject.toml", "package.json"]:
+        dep_files = ["requirements.txt", "pyproject.toml", "package.json"]
+        for dep_file in dep_files:
             path = self.root / dep_file
             if path.exists():
-                content = path.read_text().lower()
+                content = (safe_read_text(path) or "").lower()
                 if "graphql" in content and "GraphQL" not in styles:
                     styles.append("GraphQL")
                 if "grpc" in content or "protobuf" in content:
-                    styles.append("gRPC")
+                    if "gRPC" not in styles:
+                        styles.append("gRPC")
         
         route_count = 0
-        for py_file in list(self.root.rglob("*.py"))[:20]:
-            if _should_skip_path(py_file):
+        py_files = list(self.root.rglob("*.py"))[:20]
+        for py_file in py_files:
+            if should_skip_path(py_file):
                 continue
-            try:
-                content = py_file.read_text(errors="ignore")
-                if re.search(r'@(?:app|router)\.(get|post|put|delete)', content):
-                    route_count += 1
-                    if route_count >= 3:
-                        styles.insert(0, "REST")
-                        break
-            except Exception:
-                continue
+            content = safe_read_text(py_file) or ""
+            if re.search(r"@(?:app|router)\.(get|post|put|delete)", content):
+                route_count += 1
+                if route_count >= 3:
+                    styles.insert(0, "REST")
+                    break
         
-        return " + ".join(styles) if styles else "REST (assumed)"
+        if styles:
+            return " + ".join(styles)
+        return "REST (assumed)"
     
     def _detect_logging(self) -> Optional[str]:
         """Detect logging framework."""
@@ -765,56 +1011,52 @@ class ClaudeMdEnhancer:
         logging_libs = set()
         
         for f in py_files:
-            if _should_skip_path(f):
+            if should_skip_path(f):
                 continue
-            try:
-                content = f.read_text(errors="ignore")
-                if "import logging" in content:
-                    logging_libs.add("stdlib logging")
-                if "from loguru import" in content:
-                    logging_libs.add("loguru")
-                if "import structlog" in content:
-                    logging_libs.add("structlog")
-            except Exception:
-                continue
+            content = safe_read_text(f) or ""
+            if "import logging" in content:
+                logging_libs.add("stdlib logging")
+            if "from loguru import" in content:
+                logging_libs.add("loguru")
+            if "import structlog" in content:
+                logging_libs.add("structlog")
         
-        return ", ".join(logging_libs) if logging_libs else None
+        if logging_libs:
+            return ", ".join(logging_libs)
+        return None
     
-    def _find_dangerous_files(self) -> list[dict]:
+    def _find_dangerous_files(self) -> List[dict]:
         """Find files with danger signals."""
         dangerous = []
         
         danger_keywords = {
-            "payment": "💰 Payment processing",
-            "billing": "💳 Billing logic",
-            "auth": "🔐 Authentication",
-            "password": "🔑 Password handling",
-            "crypto": "🔒 Cryptography",
-            "encrypt": "🔒 Encryption",
-            "private_key": "🔑 Private key usage",
-            "migration": "🗄️ Database migration",
-            "delete from": "⚠️ Data deletion",
-            "drop table": "💥 Schema destruction",
+            "payment": "Payment processing",
+            "billing": "Billing logic",
+            "auth": "Authentication",
+            "password": "Password handling",
+            "crypto": "Cryptography",
+            "encrypt": "Encryption",
+            "private_key": "Private key usage",
+            "migration": "Database migration",
         }
         
         for py_file in self.root.rglob("*.py"):
-            if _should_skip_path(py_file):
+            if should_skip_path(py_file):
                 continue
-            try:
-                content = py_file.read_text(errors="ignore").lower()
-                matches = []
-                
-                for keyword, description in danger_keywords.items():
-                    if keyword in content:
-                        matches.append(description)
-                
-                if matches:
-                    dangerous.append({
-                        "file": str(py_file.relative_to(self.root)),
-                        "reasons": matches
-                    })
-            except Exception:
+            content = safe_read_text(py_file)
+            if not content:
                 continue
+            content_lower = content.lower()
+            matches = []
+            for keyword, description in danger_keywords.items():
+                if keyword in content_lower:
+                    matches.append(description)
+            if matches:
+                try:
+                    rel_path = str(py_file.relative_to(self.root))
+                    dangerous.append({"file": rel_path, "reasons": matches})
+                except Exception:
+                    pass
         
         dangerous.sort(key=lambda x: len(x["reasons"]), reverse=True)
         return dangerous[:10]
@@ -823,1503 +1065,2164 @@ class ClaudeMdEnhancer:
         """Detect linters, formatters, type checkers."""
         tools = {"linters": [], "formatters": [], "type_checkers": []}
         
-        for config_file in ["pyproject.toml", "setup.cfg", ".flake8", "tox.ini"]:
+        config_files = ["pyproject.toml", "setup.cfg", ".flake8", "tox.ini"]
+        for config_file in config_files:
             path = self.root / config_file
             if path.exists():
-                content = path.read_text()
+                content = safe_read_text(path) or ""
                 if "ruff" in content:
-                    tools["linters"].append("ruff")
-                if "flake8" in content and "ruff" not in tools["linters"]:
-                    tools["linters"].append("flake8")
+                    if "ruff" not in tools["linters"]:
+                        tools["linters"].append("ruff")
+                if "flake8" in content:
+                    if "flake8" not in tools["linters"]:
+                        tools["linters"].append("flake8")
                 if "pylint" in content:
-                    tools["linters"].append("pylint")
+                    if "pylint" not in tools["linters"]:
+                        tools["linters"].append("pylint")
                 if "black" in content:
-                    tools["formatters"].append("black")
+                    if "black" not in tools["formatters"]:
+                        tools["formatters"].append("black")
                 if "isort" in content:
-                    tools["formatters"].append("isort")
+                    if "isort" not in tools["formatters"]:
+                        tools["formatters"].append("isort")
                 if "mypy" in content:
-                    tools["type_checkers"].append("mypy")
+                    if "mypy" not in tools["type_checkers"]:
+                        tools["type_checkers"].append("mypy")
                 if "pyright" in content:
-                    tools["type_checkers"].append("pyright")
+                    if "pyright" not in tools["type_checkers"]:
+                        tools["type_checkers"].append("pyright")
         
-        pkg_json = self.root / "package.json"
-        if pkg_json.exists():
-            try:
-                pkg = json.loads(pkg_json.read_text())
-                deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-                
-                if "eslint" in deps:
-                    tools["linters"].append("eslint")
-                if "prettier" in deps:
-                    tools["formatters"].append("prettier")
-                if "typescript" in deps:
-                    tools["type_checkers"].append("tsc")
-            except Exception:
-                pass
+        package_json = self.root / "package.json"
+        if package_json.exists():
+            content = safe_read_text(package_json)
+            if content:
+                try:
+                    pkg = json.loads(content)
+                    deps = {}
+                    deps.update(pkg.get("dependencies", {}))
+                    deps.update(pkg.get("devDependencies", {}))
+                    if "eslint" in deps:
+                        tools["linters"].append("eslint")
+                    if "prettier" in deps:
+                        tools["formatters"].append("prettier")
+                    if "typescript" in deps:
+                        tools["type_checkers"].append("tsc")
+                except Exception:
+                    pass
         
         return {k: v for k, v in tools.items() if v}
     
     def generate_enhanced_claude_md(self, project: ProjectInfo) -> str:
-        """Generate CLAUDE.md with auto-detected patterns."""
-        conventions = self.detect_conventions(project)
-        test_frameworks = conventions.get('testing_framework', {})
-        quality_tools = conventions.get('code_quality_tools', {})
+        """Generate enhanced CLAUDE.md content."""
+        conventions = self.detect_conventions()
+        test_frameworks = conventions.get("testing_framework", {})
+        quality_tools = conventions.get("code_quality_tools", {})
         
-        test_section = ""
-        if test_frameworks:
-            test_section = "\n### Testing\n"
-            for lang, framework in test_frameworks.items():
-                test_section += f"- {lang.capitalize()}: {framework}\n"
+        lines = []
+        lines.append(f"# CLAUDE.md - Project: {project.name}")
+        lines.append("")
+        lines.append("## Identity")
+        lines.append("You are a senior developer on this project with deep knowledge of the codebase.")
+        lines.append("")
+        lines.append("## Stack")
         
-        quality_section = ""
-        if quality_tools:
-            quality_section = "\n### Code Quality\n"
-            if quality_tools.get("linters"):
-                quality_section += f"- Linters: {', '.join(quality_tools['linters'])}\n"
-            if quality_tools.get("formatters"):
-                quality_section += f"- Formatters: {', '.join(quality_tools['formatters'])}\n"
-            if quality_tools.get("type_checkers"):
-                quality_section += f"- Type checking: {', '.join(quality_tools['type_checkers'])}\n"
-        
-        dangerous_section = ""
-        dangerous_files = conventions.get('dangerous_files', [])
-        if dangerous_files:
-            dangerous_section = "\n## Dangerous Areas\n"
-            dangerous_section += "<!-- These files contain sensitive logic. Extra care required. -->\n\n"
-            for item in dangerous_files[:5]:
-                reasons = " | ".join(item['reasons'])
-                dangerous_section += f"- **`{item['file']}`** — {reasons}\n"
-                dangerous_section += "  - TODO: Add specific gotchas and review requirements\n\n"
-        
-        p = project
-        async_section = ""
-        if conventions.get('async_pattern'):
-            async_section = f"\n### Async/Await\n{conventions['async_pattern']}\n"
-        
-        return f"""# CLAUDE.md — Project: {p.name}
-
-## Identity
-You are a senior developer on this project with deep knowledge of the codebase.
-
-## Stack
-- **Languages**: {', '.join(p.languages) or 'Unknown'}
-- **Framework**: {p.framework or 'Unknown'}
-- **Package Manager**: {p.package_manager or 'Unknown'}
-{f"- **Python**: {p.python_version}" if p.python_version else ""}
-- **API Style**: {conventions.get('api_style', 'Unknown')}
-{f"- **Database**: {conventions['orm_pattern']}" if conventions.get('orm_pattern') else ""}
-{f"- **Logging**: {conventions['logging_pattern']}" if conventions.get('logging_pattern') else ""}
-{"- **Containerized**: Docker" if p.has_docker else ""}
-{"- **CI/CD**: Configured" if p.has_ci else ""}
-
-## Project Description
-{p.description or "TODO: Add a one-paragraph description of what this project does."}
-
-## Critical Conventions
-
-### Error Handling
-{conventions['error_handling']}
-<!-- TODO: Add specifics about when to use which pattern -->
-{test_section}
-{async_section}
-{quality_section}
-
-### Code Style
-- TODO: Max function length?
-- TODO: Naming conventions?
-- TODO: Import organization?
-{dangerous_section}
-## Current State
-<!-- TODO: What's in progress? What's deprecated? -->
-- TODO: Any ongoing migrations or refactors?
-- TODO: Any deprecated patterns to avoid?
-- TODO: What's the current sprint/milestone focus?
-
-## Common Tasks
-
-### Running the Project
-# TODO: How to start development
-# TODO: How to run tests
-# TODO: How to build for production
-
-### Adding New Features
-# TODO: Step-by-step guide for common additions
-
-### Deployment
-# TODO: How to deploy changes
-
-## Common Gotchas
-<!-- Things that aren't obvious from reading the code -->
-# TODO: Race conditions to watch for?
-# TODO: Order-dependent operations?
-# TODO: Performance bottlenecks?
-## Emergency Contacts
-<!-- Who to notify for critical issues -->
-# Database issues: TODO
-# Production incidents: TODO
-# Security concerns: TODO
-"""
-# ──────────────────────────────────────────────
-# Generators with src file tracking
-# ──────────────────────────────────────────────
-class TreeGenerator:
-"""Generate file tree with intelligent filtering."""
-def __init__(self, root: Path, config: dict):
-    self.root = root
-    self.config = config
-
-def generate(self) -> tuple[str, list[Path]]:
-    """Generate file tree."""
-    lines = [f"# File Tree: {self.root.name}", f"# Generated: {_now()}", ""]
-    self._walk(self.root, "", lines, depth=0)
-    source_files = []
-    return "\n".join(lines), source_files
-
-def _walk(self, directory: Path, prefix: str, lines: list, depth: int):
-    if depth > self.config.get("max_tree_depth", 6):
-        lines.append(f"{prefix}... (depth limit)")
-        return
-    if len(lines) > self.config.get("max_files_in_tree", 500):
-        lines.append(f"{prefix}... (file limit reached)")
-        return
-
-    try:
-        entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
-    except PermissionError:
-        return
-
-    entries = [e for e in entries if not self._should_exclude(e)]
-
-    for i, entry in enumerate(entries):
-        is_last = (i == len(entries) - 1)
-        connector = "└── " if is_last else "├── "
-        extension = "    " if is_last else "│   "
-
-        if entry.is_dir():
-            try:
-                file_count = sum(1 for _ in entry.rglob("*") if _.is_file())
-            except (PermissionError, OSError):
-                file_count = "?"
-            lines.append(f"{prefix}{connector}{entry.name}/ ({file_count} files)")
-            self._walk(entry, prefix + extension, lines, depth + 1)
+        if project.languages:
+            lines.append(f"- **Languages**: {', '.join(project.languages)}")
         else:
-            try:
-                size = entry.stat().st_size
-                size_str = _human_size(size)
-                lines.append(f"{prefix}{connector}{entry.name} ({size_str})")
-            except (PermissionError, OSError):
-                lines.append(f"{prefix}{connector}{entry.name}")
+            lines.append("- **Languages**: Unknown")
+        
+        lines.append(f"- **Framework**: {project.framework or 'Unknown'}")
+        lines.append(f"- **Package Manager**: {project.package_manager or 'Unknown'}")
+        
+        if project.python_version:
+            lines.append(f"- **Python**: {project.python_version}")
+        
+        api_style = conventions.get("api_style", "Unknown")
+        lines.append(f"- **API Style**: {api_style}")
+        
+        orm = conventions.get("orm_pattern")
+        if orm:
+            lines.append(f"- **Database**: {orm}")
+        
+        logging = conventions.get("logging_pattern")
+        if logging:
+            lines.append(f"- **Logging**: {logging}")
+        
+        if project.has_docker:
+            lines.append("- **Containerized**: Docker")
+        
+        if project.has_ci:
+            lines.append("- **CI/CD**: Configured")
+        
+        lines.append("")
+        lines.append("## Project Description")
+        if project.description:
+            lines.append(project.description)
+        else:
+            lines.append("TODO: Add a one-paragraph description of what this project does.")
+        
+        lines.append("")
+        lines.append("## Critical Conventions")
+        lines.append("")
+        lines.append("### Error Handling")
+        lines.append(conventions.get("error_handling", "TODO: Document error handling strategy"))
+        
+        if test_frameworks:
+            lines.append("")
+            lines.append("### Testing")
+            for lang, framework in test_frameworks.items():
+                lines.append(f"- {lang.capitalize()}: {framework}")
+        
+        async_pattern = conventions.get("async_pattern")
+        if async_pattern:
+            lines.append("")
+            lines.append("### Async/Await")
+            lines.append(async_pattern)
+        
+        if quality_tools:
+            lines.append("")
+            lines.append("### Code Quality")
+            if quality_tools.get("linters"):
+                lines.append(f"- Linters: {', '.join(quality_tools['linters'])}")
+            if quality_tools.get("formatters"):
+                lines.append(f"- Formatters: {', '.join(quality_tools['formatters'])}")
+            if quality_tools.get("type_checkers"):
+                lines.append(f"- Type checking: {', '.join(quality_tools['type_checkers'])}")
+        
+        lines.append("")
+        lines.append("### Code Style")
+        lines.append("- TODO: Max function length?")
+        lines.append("- TODO: Naming conventions?")
+        lines.append("- TODO: Import organization?")
+        
+        dangerous_files = conventions.get("dangerous_files", [])
+        if dangerous_files:
+            lines.append("")
+            lines.append("## Dangerous Areas")
+            lines.append("<!-- These files contain sensitive logic. Extra care required. -->")
+            lines.append("")
+            for item in dangerous_files[:5]:
+                reasons = " | ".join(item["reasons"])
+                lines.append(f"- **`{item['file']}`** - {reasons}")
+                lines.append("  - TODO: Add specific gotchas")
+        
+        lines.append("")
+        lines.append("## Current State")
+        lines.append("<!-- TODO: What's in progress? What's deprecated? -->")
+        lines.append("- TODO: Any ongoing migrations or refactors?")
+        lines.append("- TODO: Any deprecated patterns to avoid?")
+        
+        lines.append("")
+        lines.append("## Common Tasks")
+        lines.append("")
+        lines.append("### Running the Project")
+        lines.append("```bash")
+        lines.append("# TODO: How to start development")
+        lines.append("# TODO: How to run tests")
+        lines.append("# TODO: How to build for production")
+        lines.append("```")
+        
+        lines.append("")
+        lines.append("### Adding New Features")
+        lines.append("TODO: Step-by-step guide for common additions")
+        
+        lines.append("")
+        lines.append("## Common Gotchas")
+        lines.append("<!-- Things that aren't obvious from reading the code -->")
+        lines.append("- TODO: Race conditions to watch for?")
+        lines.append("- TODO: Order-dependent operations?")
+        lines.append("- TODO: Performance bottlenecks?")
+        
+        lines.append("")
+        
+        return "\n".join(lines)
 
-def _should_exclude(self, path: Path) -> bool:
-    name = path.name
-    exclude = self.config.get("exclude_patterns", [])
-    for pattern in exclude:
-        if pattern.startswith("*"):
-            if name.endswith(pattern[1:]):
-                return True
-        elif name == pattern:
-            return True
-    return False
+
+class TreeGenerator:
+    """Generate file tree."""
+    
+    def __init__(self, root: Path, config: dict):
+        self.root = root
+        self.config = config
+    
+    def generate(self) -> Tuple[str, List[Path]]:
+        """Generate file tree."""
+        lines = []
+        lines.append(f"# File Tree: {self.root.name}")
+        lines.append(f"# Generated: {get_timestamp()}")
+        lines.append("")
+        
+        max_depth = self.config.get("max_tree_depth", 6)
+        max_files = self.config.get("max_files_in_tree", 500)
+        
+        self._walk(self.root, "", lines, 0, max_depth, max_files)
+        
+        return "\n".join(lines), []
+    
+    def _walk(
+        self,
+        directory: Path,
+        prefix: str,
+        lines: list,
+        depth: int,
+        max_depth: int,
+        max_files: int,
+    ) -> None:
+        """Walk directory tree."""
+        if depth > max_depth:
+            lines.append(f"{prefix}... (depth limit)")
+            return
+        
+        if len(lines) > max_files:
+            lines.append(f"{prefix}... (file limit reached)")
+            return
+        
+        try:
+            entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        except PermissionError:
+            return
+        
+        entries = [e for e in entries if e.name not in EXCLUDE_DIRS]
+        
+        for i, entry in enumerate(entries):
+            is_last = i == len(entries) - 1
+            connector = "`-- " if is_last else "|-- "
+            extension = "    " if is_last else "|   "
+            
+            if entry.is_dir():
+                try:
+                    file_count = sum(1 for _ in entry.rglob("*") if _.is_file())
+                except Exception:
+                    file_count = "?"
+                lines.append(f"{prefix}{connector}{entry.name}/ ({file_count} files)")
+                self._walk(entry, prefix + extension, lines, depth + 1, max_depth, max_files)
+            else:
+                try:
+                    size = entry.stat().st_size
+                    size_str = human_readable_size(size)
+                    lines.append(f"{prefix}{connector}{entry.name} ({size_str})")
+                except Exception:
+                    lines.append(f"{prefix}{connector}{entry.name}")
+
 
 class SchemaExtractor:
-"""Extract type definitions, schemas, interfaces from source code."""
-def __init__(self, root: Path, languages: list[str]):
-    self.root = root
-    self.languages = languages
-
-def extract(self) -> dict[str, tuple[str, list[Path]]]:
-    """Extract schemas for all languages."""
-    results = {}
-
-    if "python" in self.languages:
-        content, sources = self._extract_python()
-        if content:
-            results["schemas-extracted.py"] = (content, sources)
+    """Extract type definitions and schemas."""
     
-    if "typescript" in self.languages:
-        content, sources = self._extract_typescript()
-        if content:
-            results["types-extracted.ts"] = (content, sources)
+    def __init__(self, root: Path, languages: List[str]):
+        self.root = root
+        self.languages = languages
     
-    if "rust" in self.languages:
-        content, sources = self._extract_rust()
-        if content:
-            results["rust-types.rs"] = (content, sources)
+    def extract(self) -> Dict[str, Tuple[str, List[Path]]]:
+        """Extract schemas for all detected languages."""
+        results = {}
+        
+        if "python" in self.languages:
+            content, sources = self._extract_python()
+            if content:
+                results["schemas-extracted.py"] = (content, sources)
+        
+        if "typescript" in self.languages:
+            content, sources = self._extract_typescript()
+            if content:
+                results["types-extracted.ts"] = (content, sources)
+        
+        if "rust" in self.languages:
+            content, sources = self._extract_rust()
+            if content:
+                results["rust-types.rs"] = (content, sources)
+        
+        if "go" in self.languages:
+            content, sources = self._extract_go()
+            if content:
+                results["go-types.go"] = (content, sources)
+        
+        if "csharp" in self.languages:
+            content, sources = self._extract_csharp()
+            if content:
+                results["csharp-types.cs"] = (content, sources)
+        
+        return results
     
-    if "go" in self.languages:
-        content, sources = self._extract_go()
-        if content:
-            results["go-types.go"] = (content, sources)
-    
-    if "csharp" in self.languages:
-        content, sources = self._extract_csharp()
-        if content:
-            results["csharp-types.cs"] = (content, sources)
-
-    return results
-
-def _extract_python(self) -> tuple[str, list[Path]]:
-    """Extract Pydantic models, dataclasses, TypedDicts, enums."""
-    output_lines = ["# Auto-extracted Python type definitions", f"# Generated: {_now()}", ""]
-    source_files = []
-
-    for py_file in self.root.rglob("*.py"):
-        if _should_skip_path(py_file):
-            continue
-
-        try:
-            content = py_file.read_text(errors="ignore")
-            tree = ast.parse(content)
-        except (SyntaxError, Exception):
-            continue
-
-        classes_in_file = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
+    def _extract_python(self) -> Tuple[str, List[Path]]:
+        """Extract Python type definitions."""
+        lines = []
+        lines.append("# Auto-extracted Python type definitions")
+        lines.append(f"# Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+            
+            classes_in_file = []
+            
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                
                 base_names = []
                 for base in node.bases:
                     if isinstance(base, ast.Name):
                         base_names.append(base.id)
                     elif isinstance(base, ast.Attribute):
                         base_names.append(base.attr)
-
-                interesting_bases = {"BaseModel", "BaseSchema", "TypedDict", "Enum", "IntEnum", "StrEnum"}
-
-                is_dataclass = any(
-                    isinstance(d, ast.Name) and d.id == "dataclass"
-                    or isinstance(d, ast.Attribute) and d.attr == "dataclass"
-                    for d in node.decorator_list
-                )
-
-                if set(base_names) & interesting_bases or is_dataclass:
+                
+                interesting = {"BaseModel", "BaseSchema", "TypedDict", "Enum", "IntEnum", "StrEnum"}
+                
+                is_dataclass = False
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Name) and decorator.id == "dataclass":
+                        is_dataclass = True
+                    elif isinstance(decorator, ast.Attribute) and decorator.attr == "dataclass":
+                        is_dataclass = True
+                
+                if set(base_names) & interesting or is_dataclass:
                     start = node.lineno - 1
                     end = node.end_lineno or start + 1
                     source_lines = content.split("\n")[start:end]
                     classes_in_file.append("\n".join(source_lines))
+            
+            if classes_in_file:
+                source_files.append(py_file)
+                rel_path = py_file.relative_to(self.root)
+                lines.append(f"\n# -- {rel_path} --")
+                lines.extend(classes_in_file)
+                lines.append("")
+        
+        return "\n".join(lines), source_files
+    
+    def _extract_typescript(self) -> Tuple[str, List[Path]]:
+        """Extract TypeScript type definitions."""
+        lines = []
+        lines.append("// Auto-extracted TypeScript type definitions")
+        lines.append(f"// Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        pattern = re.compile(
+            r"^export\s+(?:interface|type|enum|const\s+enum)\s+.*?(?:\{[\s\S]*?\n\}|=\s*[\s\S]*?;)",
+            re.MULTILINE,
+        )
+        
+        for ts_file in self.root.rglob("*.ts"):
+            if should_skip_path(ts_file):
+                continue
+            if ".spec.ts" in ts_file.name or ".test.ts" in ts_file.name:
+                continue
+            
+            content = safe_read_text(ts_file)
+            if not content:
+                continue
+            
+            matches = pattern.findall(content)
+            if matches:
+                source_files.append(ts_file)
+                rel_path = ts_file.relative_to(self.root)
+                lines.append(f"\n// -- {rel_path} --")
+                for match in matches:
+                    lines.append(match.strip())
+                    lines.append("")
+        
+        return "\n".join(lines), source_files
+    
+    def _extract_rust(self) -> Tuple[str, List[Path]]:
+        """Extract Rust type definitions."""
+        lines = []
+        lines.append("// Auto-extracted Rust type definitions")
+        lines.append(f"// Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        pattern = re.compile(
+            r"(?:#\[derive\(.*?\)\]\s*)?pub\s+(?:struct|enum|trait)\s+\w+[\s\S]*?\n\}",
+            re.MULTILINE,
+        )
+        
+        for rs_file in self.root.rglob("*.rs"):
+            if should_skip_path(rs_file):
+                continue
+            
+            content = safe_read_text(rs_file)
+            if not content:
+                continue
+            
+            matches = pattern.findall(content)
+            if matches:
+                source_files.append(rs_file)
+                rel_path = rs_file.relative_to(self.root)
+                lines.append(f"\n// -- {rel_path} --")
+                for match in matches:
+                    lines.append(match.strip())
+                    lines.append("")
+        
+        return "\n".join(lines), source_files
+    
+    def _extract_go(self) -> Tuple[str, List[Path]]:
+        """Extract Go type definitions."""
+        lines = []
+        lines.append("// Auto-extracted Go type definitions")
+        lines.append(f"// Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        pattern = re.compile(
+            r"type\s+\w+\s+(?:struct|interface)\s*\{[\s\S]*?\n\}",
+            re.MULTILINE,
+        )
+        
+        for go_file in self.root.rglob("*.go"):
+            if should_skip_path(go_file):
+                continue
+            if "_test.go" in go_file.name:
+                continue
+            
+            content = safe_read_text(go_file)
+            if not content:
+                continue
+            
+            matches = pattern.findall(content)
+            if matches:
+                source_files.append(go_file)
+                rel_path = go_file.relative_to(self.root)
+                lines.append(f"\n// -- {rel_path} --")
+                for match in matches:
+                    lines.append(match.strip())
+                    lines.append("")
+        
+        return "\n".join(lines), source_files
+    
+    def _extract_csharp(self) -> Tuple[str, List[Path]]:
+        """Extract C# type definitions."""
+        lines = []
+        lines.append("// Auto-extracted C# type definitions")
+        lines.append(f"// Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        pattern = re.compile(
+            r"public\s+(?:sealed\s+|abstract\s+|partial\s+|static\s+)*"
+            r"(?:class|record|enum|interface|struct)\s+\w+[\s\S]*?\n\}",
+            re.MULTILINE,
+        )
+        
+        for cs_file in self.root.rglob("*.cs"):
+            if should_skip_path(cs_file):
+                continue
+            
+            content = safe_read_text(cs_file)
+            if not content:
+                continue
+            
+            matches = pattern.findall(content)
+            if matches:
+                source_files.append(cs_file)
+                rel_path = cs_file.relative_to(self.root)
+                lines.append(f"\n// -- {rel_path} --")
+                for match in matches:
+                    lines.append(match.strip())
+                    lines.append("")
+        
+        return "\n".join(lines), source_files
 
-        if classes_in_file:
-            source_files.append(py_file)
-            rel_path = py_file.relative_to(self.root)
-            output_lines.append(f"\n# ── {rel_path} ──")
-            output_lines.extend(classes_in_file)
-            output_lines.append("")
-
-    return "\n".join(output_lines), source_files
-
-def _extract_typescript(self) -> tuple[str, list[Path]]:
-    """Extract interfaces, type aliases, enums from TS files."""
-    output_lines = ["// Auto-extracted TypeScript type definitions", f"// Generated: {_now()}", ""]
-    source_files = []
-
-    pattern = re.compile(
-        r'^export\s+(?:interface|type|enum|const\s+enum)\s+.*?(?:\{[\s\S]*?\n\}|=\s*[\s\S]*?;)',
-        re.MULTILINE
-    )
-
-    for ts_file in self.root.rglob("*.ts"):
-        if _should_skip_path(ts_file) or ts_file.suffix == ".spec.ts":
-            continue
-
-        try:
-            content = ts_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = pattern.findall(content)
-        if matches:
-            source_files.append(ts_file)
-            rel_path = ts_file.relative_to(self.root)
-            output_lines.append(f"\n// ── {rel_path} ──")
-            for match in matches:
-                output_lines.append(match.strip())
-                output_lines.append("")
-
-    return "\n".join(output_lines), source_files
-
-def _extract_rust(self) -> tuple[str, list[Path]]:
-    """Extract structs, enums, traits from Rust files."""
-    output_lines = ["// Auto-extracted Rust type definitions", f"// Generated: {_now()}", ""]
-    source_files = []
-
-    pattern = re.compile(
-        r'(?:#\[derive\(.*?\)\]\s*)?pub\s+(?:struct|enum|trait)\s+\w+[\s\S]*?\n\}',
-        re.MULTILINE
-    )
-
-    for rs_file in self.root.rglob("*.rs"):
-        if _should_skip_path(rs_file):
-            continue
-        try:
-            content = rs_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = pattern.findall(content)
-        if matches:
-            source_files.append(rs_file)
-            rel_path = rs_file.relative_to(self.root)
-            output_lines.append(f"\n// ── {rel_path} ──")
-            for match in matches:
-                output_lines.append(match.strip())
-                output_lines.append("")
-
-    return "\n".join(output_lines), source_files
-
-def _extract_go(self) -> tuple[str, list[Path]]:
-    """Extract structs, interfaces from Go files."""
-    output_lines = ["// Auto-extracted Go type definitions", f"// Generated: {_now()}", ""]
-    source_files = []
-
-    pattern = re.compile(r'type\s+\w+\s+(?:struct|interface)\s*\{[\s\S]*?\n\}', re.MULTILINE)
-
-    for go_file in self.root.rglob("*.go"):
-        if _should_skip_path(go_file) or "_test.go" in go_file.name:
-            continue
-        try:
-            content = go_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = pattern.findall(content)
-        if matches:
-            source_files.append(go_file)
-            rel_path = go_file.relative_to(self.root)
-            output_lines.append(f"\n// ── {rel_path} ──")
-            for match in matches:
-                output_lines.append(match.strip())
-                output_lines.append("")
-
-    return "\n".join(output_lines), source_files
-
-def _extract_csharp(self) -> tuple[str, list[Path]]:
-    """Extract classes, records, enums, interfaces from C# files."""
-    output_lines = ["// Auto-extracted C# type definitions", f"// Generated: {_now()}", ""]
-    source_files = []
-
-    pattern = re.compile(
-        r'public\s+(?:sealed\s+|abstract\s+|partial\s+|static\s+)*(?:class|record|enum|interface|struct)\s+\w+[\s\S]*?\n\}',
-        re.MULTILINE
-    )
-
-    for cs_file in self.root.rglob("*.cs"):
-        if _should_skip_path(cs_file):
-            continue
-        try:
-            content = cs_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = pattern.findall(content)
-        if matches:
-            source_files.append(cs_file)
-            rel_path = cs_file.relative_to(self.root)
-            output_lines.append(f"\n// ── {rel_path} ──")
-            for match in matches:
-                output_lines.append(match.strip())
-                output_lines.append("")
-
-    return "\n".join(output_lines), source_files
 
 class APIExtractor:
-"""Extract route definitions and public function signatures."""
-def __init__(self, root: Path, languages: list[str], framework: str):
-    self.root = root
-    self.languages = languages
-    self.framework = framework
-
-def extract_routes(self) -> tuple[str, list[Path]]:
-    """Extract API routes."""
-    lines = [f"# API Routes", f"# Generated: {_now()}", ""]
-    source_files = []
-
-    if "python" in self.languages:
-        content, sources = self._extract_python_routes()
-        lines.extend(content)
-        source_files.extend(sources)
+    """Extract API routes and public function signatures."""
     
-    if "typescript" in self.languages or "javascript" in self.languages:
-        content, sources = self._extract_js_routes()
-        lines.extend(content)
-        source_files.extend(sources)
-
-    return "\n".join(lines) if len(lines) > 3 else "", source_files
-
-def extract_public_api(self) -> tuple[str, list[Path]]:
-    """Extract public function signatures."""
-    lines = [f"# Public API (function signatures)", f"# Generated: {_now()}", ""]
-    source_files = []
-
-    if "python" in self.languages:
-        content, sources = self._extract_python_signatures()
-        lines.extend(content)
-        source_files.extend(sources)
+    def __init__(self, root: Path, languages: List[str], framework: str):
+        self.root = root
+        self.languages = languages
+        self.framework = framework
     
-    if "typescript" in self.languages:
-        content, sources = self._extract_ts_signatures()
-        lines.extend(content)
-        source_files.extend(sources)
-
-    return "\n".join(lines), source_files
-
-def _extract_python_routes(self) -> tuple[list[str], list[Path]]:
-    lines = []
-    source_files = []
-    route_pattern = re.compile(
-        r'@(?:app|router|api)\.(get|post|put|patch|delete|head|options|websocket)\s*\(\s*["\']([^"\']*)["\']'
-    )
-
-    for py_file in self.root.rglob("*.py"):
-        if _should_skip_path(py_file):
-            continue
-        try:
-            content = py_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = route_pattern.findall(content)
-        if matches:
-            source_files.append(py_file)
-            rel = py_file.relative_to(self.root)
-            lines.append(f"\n## {rel}")
-            for method, path in matches:
-                lines.append(f"  {method.upper():8s} {path}")
-
-    return lines, source_files
-
-def _extract_js_routes(self) -> tuple[list[str], list[Path]]:
-    lines = []
-    source_files = []
-    route_pattern = re.compile(
-        r'(?:app|router|server)\.(get|post|put|patch|delete)\s*\(\s*["\'/]([^"\']*)["\']'
-    )
-
-    for ext in ["*.js", "*.ts"]:
-        for js_file in self.root.rglob(ext):
-            if _should_skip_path(js_file):
+    def extract_routes(self) -> Tuple[str, List[Path]]:
+        """Extract API routes."""
+        lines = []
+        lines.append("# API Routes")
+        lines.append(f"# Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        if "python" in self.languages:
+            py_lines, py_files = self._extract_python_routes()
+            lines.extend(py_lines)
+            source_files.extend(py_files)
+        
+        if "typescript" in self.languages or "javascript" in self.languages:
+            js_lines, js_files = self._extract_js_routes()
+            lines.extend(js_lines)
+            source_files.extend(js_files)
+        
+        if len(lines) <= 3:
+            return "", []
+        
+        return "\n".join(lines), source_files
+    
+    def extract_public_api(self) -> Tuple[str, List[Path]]:
+        """Extract public function signatures."""
+        lines = []
+        lines.append("# Public API (function signatures)")
+        lines.append(f"# Generated: {get_timestamp()}")
+        lines.append("")
+        
+        source_files = []
+        
+        if "python" in self.languages:
+            py_lines, py_files = self._extract_python_signatures()
+            lines.extend(py_lines)
+            source_files.extend(py_files)
+        
+        if "typescript" in self.languages:
+            ts_lines, ts_files = self._extract_ts_signatures()
+            lines.extend(ts_lines)
+            source_files.extend(ts_files)
+        
+        return "\n".join(lines), source_files
+    
+    def _extract_python_routes(self) -> Tuple[List[str], List[Path]]:
+        """Extract Python routes."""
+        lines = []
+        source_files = []
+        
+        route_pattern = re.compile(
+            r"@(?:app|router|api)\.(get|post|put|patch|delete|head|options|websocket)"
+            r'\s*\(\s*["\']([^"\']*)["\']'
+        )
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
                 continue
-            try:
-                content = js_file.read_text(errors="ignore")
-            except Exception:
+            
+            content = safe_read_text(py_file)
+            if not content:
                 continue
-
+            
             matches = route_pattern.findall(content)
             if matches:
-                source_files.append(js_file)
-                rel = js_file.relative_to(self.root)
+                source_files.append(py_file)
+                rel = py_file.relative_to(self.root)
                 lines.append(f"\n## {rel}")
                 for method, path in matches:
                     lines.append(f"  {method.upper():8s} {path}")
+        
+        return lines, source_files
+    
+    def _extract_js_routes(self) -> Tuple[List[str], List[Path]]:
+        """Extract JavaScript/TypeScript routes."""
+        lines = []
+        source_files = []
+        
+        route_pattern = re.compile(
+            r"(?:app|router|server)\.(get|post|put|patch|delete)"
+            r'\s*\(\s*["\'/]([^"\']*)["\']'
+        )
+        
+        for ext in ["*.js", "*.ts"]:
+            for js_file in self.root.rglob(ext):
+                if should_skip_path(js_file):
+                    continue
+                
+                content = safe_read_text(js_file)
+                if not content:
+                    continue
+                
+                matches = route_pattern.findall(content)
+                if matches:
+                    source_files.append(js_file)
+                    rel = js_file.relative_to(self.root)
+                    lines.append(f"\n## {rel}")
+                    for method, path in matches:
+                        lines.append(f"  {method.upper():8s} {path}")
+        
+        return lines, source_files
+    
+    def _extract_python_signatures(self) -> Tuple[List[str], List[Path]]:
+        """Extract Python function signatures."""
+        lines = []
+        source_files = []
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+            
+            sigs = []
+            
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if not node.name.startswith("_"):
+                        sig = self._format_python_sig(node, "")
+                        sigs.append(sig)
+                elif isinstance(node, ast.ClassDef):
+                    for item in node.body:
+                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            if not item.name.startswith("_") or item.name == "__init__":
+                                sig = self._format_python_sig(item, node.name)
+                                sigs.append(sig)
+            
+            if sigs:
+                source_files.append(py_file)
+                rel = py_file.relative_to(self.root)
+                lines.append(f"\n## {rel}")
+                lines.extend(sigs)
+        
+        return lines, source_files
+    
+    def _format_python_sig(self, node, class_name: str) -> str:
+        """Format a Python function signature."""
+        if isinstance(node, ast.AsyncFunctionDef):
+            prefix = "async "
+        else:
+            prefix = ""
+        
+        if class_name:
+            name = f"{class_name}.{node.name}"
+        else:
+            name = node.name
+        
+        args = []
+        for arg in node.args.args:
+            if arg.arg == "self":
+                continue
+            if arg.annotation:
+                try:
+                    annotation = f": {ast.unparse(arg.annotation)}"
+                except Exception:
+                    annotation = ""
+            else:
+                annotation = ""
+            args.append(f"{arg.arg}{annotation}")
+        
+        returns = ""
+        if node.returns:
+            try:
+                returns = f" -> {ast.unparse(node.returns)}"
+            except Exception:
+                pass
+        
+        args_str = ", ".join(args)
+        return f"  {prefix}def {name}({args_str}){returns}"
+    
+    def _extract_ts_signatures(self) -> Tuple[List[str], List[Path]]:
+        """Extract TypeScript function signatures."""
+        lines = []
+        source_files = []
+        
+        pattern = re.compile(
+            r"^export\s+(?:async\s+)?function\s+(\w+)\s*"
+            r"\(([^)]*)\)\s*(?::\s*([^\{]*))?",
+            re.MULTILINE,
+        )
+        
+        for ts_file in self.root.rglob("*.ts"):
+            if should_skip_path(ts_file):
+                continue
+            
+            content = safe_read_text(ts_file)
+            if not content:
+                continue
+            
+            matches = pattern.findall(content)
+            if matches:
+                source_files.append(ts_file)
+                rel = ts_file.relative_to(self.root)
+                lines.append(f"\n## {rel}")
+                for name, params, return_type in matches:
+                    ret = ""
+                    if return_type and return_type.strip():
+                        ret = f": {return_type.strip()}"
+                    lines.append(f"  function {name}({params}){ret}")
+        
+        return lines, source_files
 
-    return lines, source_files
-
-def _extract_python_signatures(self) -> tuple[list[str], list[Path]]:
-    lines = []
-    source_files = []
-
-    for py_file in self.root.rglob("*.py"):
-        if _should_skip_path(py_file):
-            continue
-        try:
-            content = py_file.read_text(errors="ignore")
-            tree = ast.parse(content)
-        except Exception:
-            continue
-
-        sigs = []
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not node.name.startswith("_"):
-                    sig = self._format_python_sig(node)
-                    sigs.append(sig)
-            elif isinstance(node, ast.ClassDef):
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if not item.name.startswith("_") or item.name == "__init__":
-                            sig = self._format_python_sig(item, class_name=node.name)
-                            sigs.append(sig)
-
-        if sigs:
-            source_files.append(py_file)
-            rel = py_file.relative_to(self.root)
-            lines.append(f"\n## {rel}")
-            lines.extend(sigs)
-
-    return lines, source_files
-
-def _format_python_sig(self, node: ast.FunctionDef, class_name: str = "") -> str:
-    prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
-    name = f"{class_name}.{node.name}" if class_name else node.name
-
-    args = []
-    for arg in node.args.args:
-        if arg.arg == "self":
-            continue
-        annotation = ""
-        if arg.annotation:
-            annotation = f": {ast.unparse(arg.annotation)}"
-        args.append(f"{arg.arg}{annotation}")
-
-    returns = ""
-    if node.returns:
-        returns = f" -> {ast.unparse(node.returns)}"
-
-    return f"  {prefix}def {name}({', '.join(args)}){returns}"
-
-def _extract_ts_signatures(self) -> tuple[list[str], list[Path]]:
-    lines = []
-    source_files = []
-    pattern = re.compile(
-        r'^export\s+(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([^\{]*))?',
-        re.MULTILINE
-    )
-
-    for ts_file in self.root.rglob("*.ts"):
-        if _should_skip_path(ts_file):
-            continue
-        try:
-            content = ts_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        matches = pattern.findall(content)
-        if matches:
-            source_files.append(ts_file)
-            rel = ts_file.relative_to(self.root)
-            lines.append(f"\n## {rel}")
-            for name, params, return_type in matches:
-                ret = f": {return_type.strip()}" if return_type.strip() else ""
-                lines.append(f"  function {name}({params}){ret}")
-
-    return lines, source_files
 
 class DependencyAnalyzer:
-"""Analyze internal import/dependency relationships."""
-def __init__(self, root: Path, languages: list[str]):
-    self.root = root
-    self.languages = languages
-
-def analyze(self) -> tuple[str, list[Path]]:
-    """Analyze dependencies and return text + source files."""
-    lines = [f"# Internal Dependency Graph", f"# Generated: {_now()}", ""]
-    source_files = []
-
-    if "python" in self.languages:
-        content, sources = self._analyze_python()
-        lines.extend(content)
-        source_files.extend(sources)
+    """Analyze internal import dependencies."""
     
-    if "typescript" in self.languages or "javascript" in self.languages:
-        content, sources = self._analyze_js()
-        lines.extend(content)
-        source_files.extend(sources)
-
-    return "\n".join(lines), source_files
-
-def _analyze_python(self) -> tuple[list[str], list[Path]]:
-    lines = ["## Python Imports", ""]
-    source_files = []
-    import_pattern = re.compile(r'^(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))', re.MULTILINE)
-
-    src_dirs = [d for d in ["src", "app", "lib", self.root.name] if (self.root / d).is_dir()]
-    package_root = src_dirs[0] if src_dirs else ""
-
-    graph = {}
-    for py_file in self.root.rglob("*.py"):
-        if _should_skip_path(py_file):
-            continue
-        try:
-            content = py_file.read_text(errors="ignore")
-        except Exception:
-            continue
-
-        source_files.append(py_file)
-        rel = str(py_file.relative_to(self.root))
-        imports = []
-        for match in import_pattern.finditer(content):
-            module = match.group(1) or match.group(2)
-            if package_root and module.startswith(package_root):
-                imports.append(module)
-            elif module.startswith("."):
-                imports.append(module)
-
-        if imports:
-            graph[rel] = imports
-
-    for file, imports in sorted(graph.items()):
-        lines.append(f"{file}")
-        for imp in imports:
-            lines.append(f"  → {imp}")
+    def __init__(self, root: Path, languages: List[str]):
+        self.root = root
+        self.languages = languages
+    
+    def analyze(self) -> Tuple[str, List[Path]]:
+        """Analyze dependencies."""
+        lines = []
+        lines.append("# Internal Dependency Graph")
+        lines.append(f"# Generated: {get_timestamp()}")
         lines.append("")
-
-    return lines, source_files
-
-def _analyze_js(self) -> tuple[list[str], list[Path]]:
-    lines = ["## JavaScript/TypeScript Imports", ""]
-    source_files = []
-    import_pattern = re.compile(r"""(?:import|require)\s*\(?['"](\.[^'"]+)['"]""", re.MULTILINE)
-
-    graph = {}
-    for ext in ["*.js", "*.ts", "*.tsx", "*.jsx"]:
-        for f in self.root.rglob(ext):
-            if _should_skip_path(f):
+        
+        source_files = []
+        
+        if "python" in self.languages:
+            py_lines, py_files = self._analyze_python()
+            lines.extend(py_lines)
+            source_files.extend(py_files)
+        
+        if "typescript" in self.languages or "javascript" in self.languages:
+            js_lines, js_files = self._analyze_js()
+            lines.extend(js_lines)
+            source_files.extend(js_files)
+        
+        return "\n".join(lines), source_files
+    
+    def _analyze_python(self) -> Tuple[List[str], List[Path]]:
+        """Analyze Python imports."""
+        lines = ["## Python Imports", ""]
+        source_files = []
+        
+        import_pattern = re.compile(
+            r"^(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))",
+            re.MULTILINE,
+        )
+        
+        src_dirs = []
+        for d in ["src", "app", "lib", self.root.name]:
+            if (self.root / d).is_dir():
+                src_dirs.append(d)
+        package_root = src_dirs[0] if src_dirs else ""
+        
+        graph = {}
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
                 continue
-            try:
-                content = f.read_text(errors="ignore")
-            except Exception:
+            
+            content = safe_read_text(py_file)
+            if not content:
                 continue
-
-            source_files.append(f)
-            rel = str(f.relative_to(self.root))
-            imports = [m for m in import_pattern.findall(content)]
+            
+            source_files.append(py_file)
+            rel = str(py_file.relative_to(self.root))
+            
+            imports = []
+            for match in import_pattern.finditer(content):
+                module = match.group(1) or match.group(2)
+                if package_root and module.startswith(package_root):
+                    imports.append(module)
+                elif module.startswith("."):
+                    imports.append(module)
+            
             if imports:
                 graph[rel] = imports
+        
+        for file, imports in sorted(graph.items()):
+            lines.append(f"{file}")
+            for imp in imports:
+                lines.append(f"  -> {imp}")
+            lines.append("")
+        
+        return lines, source_files
+    
+    def _analyze_js(self) -> Tuple[List[str], List[Path]]:
+        """Analyze JavaScript/TypeScript imports."""
+        lines = ["## JavaScript/TypeScript Imports", ""]
+        source_files = []
+        
+        import_pattern = re.compile(
+            r"""(?:import|require)\s*\(?['"](\.[^'"]+)['"]""",
+            re.MULTILINE,
+        )
+        
+        graph = {}
+        
+        for ext in ["*.js", "*.ts", "*.tsx", "*.jsx"]:
+            for f in self.root.rglob(ext):
+                if should_skip_path(f):
+                    continue
+                
+                content = safe_read_text(f)
+                if not content:
+                    continue
+                
+                source_files.append(f)
+                rel = str(f.relative_to(self.root))
+                
+                imports = import_pattern.findall(content)
+                if imports:
+                    graph[rel] = imports
+        
+        for file, imports in sorted(graph.items()):
+            lines.append(f"{file}")
+            for imp in imports:
+                lines.append(f"  -> {imp}")
+            lines.append("")
+        
+        return lines, source_files
 
-    for file, imports in sorted(graph.items()):
-        lines.append(f"{file}")
-        for imp in imports:
-            lines.append(f"  → {imp}")
-        lines.append("")
-
-    return lines, source_files
 
 class DependencyGraphVisualizer:
-"""Generate visual dependency graphs in Mermaid format."""
-def generate_mermaid(self, dependency_text: str) -> str:
-    """Convert text dependency output to Mermaid diagram."""
-    lines = ["# Dependency Graph Visualization", "", "```mermaid", "graph LR"]
+    """Generate Mermaid dependency graph."""
     
-    current_file = None
-    edges = []
-    
-    for line in dependency_text.split('\n'):
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
+    def generate_mermaid(self, dependency_text: str) -> str:
+        """Convert dependency text to Mermaid diagram."""
+        lines = []
+        lines.append("# Dependency Graph Visualization")
+        lines.append("")
+        lines.append("```mermaid")
+        lines.append("graph LR")
         
-        if line.startswith('##'):
-            continue
+        current_file = None
+        edges = []
         
-        if line.startswith('→'):
-            dep = line[1:].strip()
-            if current_file and dep:
-                edges.append((current_file, dep))
-        else:
-            current_file = line
-    
-    def sanitize(name: str) -> str:
-        return name.replace("/", "_").replace(".", "_").replace("-", "_")
-    
-    seen = set()
-    for source, target in edges:
-        source_id = sanitize(source)
-        target_id = sanitize(target)
-        edge = f"{source_id} --> {target_id}"
-        if edge not in seen:
-            lines.append(f"  {edge}")
-            seen.add(edge)
-    
-    lines.append("```")
-    return "\n".join(lines)
+        for line in dependency_text.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("##"):
+                continue
+            if line.startswith("->"):
+                dep = line[2:].strip()
+                if current_file and dep:
+                    edges.append((current_file, dep))
+            else:
+                current_file = line
+        
+        def sanitize(name: str) -> str:
+            return name.replace("/", "_").replace(".", "_").replace("-", "_")
+        
+        seen = set()
+        for source, target in edges:
+            source_id = sanitize(source)
+            target_id = sanitize(target)
+            edge = f"{source_id} --> {target_id}"
+            if edge not in seen:
+                lines.append(f"  {edge}")
+                seen.add(edge)
+        
+        lines.append("```")
+        
+        return "\n".join(lines)
 
-class DatabaseSchemaExtractor:
-"""Extract database schema from various sources."""
-def __init__(self, root: Path):
-    self.root = root
 
-def extract(self) -> Optional[tuple[str, list[Path]]]:
-    """Extract database schema if available."""
-    schema = self._from_sqlalchemy_models()
-    if schema:
-        return schema
+class SymbolIndexGenerator:
+    """Generate symbol index for navigation."""
     
-    schema = self._from_django_models()
-    if schema:
-        return schema
+    def __init__(self, root: Path, languages: List[str]):
+        self.root = root
+        self.languages = languages
     
-    prisma_schema = self.root / "prisma/schema.prisma"
-    if prisma_schema.exists():
-        content = f"# Database Schema (Prisma)\n\n```prisma\n{prisma_schema.read_text()}\n```"
-        return content, [prisma_schema]
+    def generate(self) -> Tuple[str, List[Path]]:
+        """Generate symbol index."""
+        symbols = {
+            "classes": {},
+            "functions": {},
+            "routes": {},
+        }
+        source_files = []
+        
+        if "python" in self.languages:
+            py_symbols, py_files = self._index_python()
+            symbols["classes"].update(py_symbols.get("classes", {}))
+            symbols["functions"].update(py_symbols.get("functions", {}))
+            source_files.extend(py_files)
+        
+        if "typescript" in self.languages or "javascript" in self.languages:
+            ts_symbols, ts_files = self._index_typescript()
+            symbols["classes"].update(ts_symbols.get("classes", {}))
+            symbols["functions"].update(ts_symbols.get("functions", {}))
+            source_files.extend(ts_files)
+        
+        return json.dumps(symbols, indent=2), source_files
     
-    schema = self._from_typeorm_entities()
-    if schema:
-        return schema
-    
-    schema = self._from_live_db()
-    if schema:
-        return schema
-    
-    return None
-
-def _from_sqlalchemy_models(self) -> Optional[tuple[str, list[Path]]]:
-    """Parse SQLAlchemy models and generate schema."""
-    model_files = []
-    for py_file in self.root.rglob("*.py"):
-        if "model" in py_file.name.lower():
+    def _index_python(self) -> Tuple[dict, List[Path]]:
+        """Index Python symbols."""
+        symbols = {"classes": {}, "functions": {}}
+        files = []
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
             try:
-                content = py_file.read_text(errors="ignore")
-                if "from sqlalchemy" in content or "declarative_base" in content:
-                    model_files.append(py_file)
+                tree = ast.parse(content)
+                files.append(py_file)
+                rel_path = str(py_file.relative_to(self.root))
+                
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        symbols["classes"][node.name] = rel_path
+                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        if not node.name.startswith("_"):
+                            symbols["functions"][node.name] = rel_path
             except Exception:
                 continue
+        
+        return symbols, files
     
-    if not model_files:
+    def _index_typescript(self) -> Tuple[dict, List[Path]]:
+        """Index TypeScript symbols."""
+        symbols = {"classes": {}, "functions": {}}
+        files = []
+        
+        class_pattern = re.compile(r"(?:export\s+)?class\s+(\w+)")
+        function_pattern = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)")
+        
+        for ts_file in self.root.rglob("*.ts"):
+            if should_skip_path(ts_file):
+                continue
+            
+            content = safe_read_text(ts_file)
+            if not content:
+                continue
+            
+            files.append(ts_file)
+            rel_path = str(ts_file.relative_to(self.root))
+            
+            for match in class_pattern.finditer(content):
+                symbols["classes"][match.group(1)] = rel_path
+            
+            for match in function_pattern.finditer(content):
+                symbols["functions"][match.group(1)] = rel_path
+        
+        return symbols, files
+
+
+class EntryPointDetector:
+    """Detect application entry points."""
+    
+    def __init__(self, root: Path, languages: List[str]):
+        self.root = root
+        self.languages = languages
+    
+    def detect(self) -> Tuple[str, List[Path]]:
+        """Detect entry points."""
+        entry_points = {
+            "main_files": [],
+            "server_files": [],
+            "cli_files": [],
+            "test_suites": [],
+        }
+        source_files = []
+        
+        main_patterns = [
+            "main.py", "app.py", "__main__.py", "manage.py",
+            "main.ts", "index.ts", "server.ts", "app.ts",
+            "main.js", "index.js", "server.js", "app.js",
+            "main.go", "main.rs",
+        ]
+        
+        server_patterns = ["server.py", "wsgi.py", "asgi.py"]
+        cli_patterns = ["cli.py", "cli.ts", "cmd.py"]
+        
+        for pattern in main_patterns:
+            for f in self.root.rglob(pattern):
+                if not should_skip_path(f):
+                    rel_path = str(f.relative_to(self.root))
+                    if rel_path not in entry_points["main_files"]:
+                        entry_points["main_files"].append(rel_path)
+                        source_files.append(f)
+        
+        for pattern in server_patterns:
+            for f in self.root.rglob(pattern):
+                if not should_skip_path(f):
+                    rel_path = str(f.relative_to(self.root))
+                    if rel_path not in entry_points["server_files"]:
+                        entry_points["server_files"].append(rel_path)
+        
+        for pattern in cli_patterns:
+            for f in self.root.rglob(pattern):
+                if not should_skip_path(f):
+                    rel_path = str(f.relative_to(self.root))
+                    if rel_path not in entry_points["cli_files"]:
+                        entry_points["cli_files"].append(rel_path)
+        
+        test_dirs = ["tests", "test", "__tests__", "spec"]
+        for test_dir in test_dirs:
+            test_path = self.root / test_dir
+            if test_path.exists() and test_path.is_dir():
+                entry_points["test_suites"].append(test_dir)
+        
+        return json.dumps(entry_points, indent=2), source_files
+
+
+class DatabaseSchemaExtractor:
+    """Extract database schema from various sources."""
+    
+    def __init__(self, root: Path):
+        self.root = root
+    
+    def extract(self) -> Optional[Tuple[str, List[Path]]]:
+        """Extract database schema."""
+        result = self._from_sqlalchemy()
+        if result:
+            return result
+        
+        result = self._from_django()
+        if result:
+            return result
+        
+        prisma_schema = self.root / "prisma" / "schema.prisma"
+        if prisma_schema.exists():
+            content = safe_read_text(prisma_schema)
+            if content:
+                output = f"# Database Schema (Prisma)\n\n```prisma\n{content}\n```"
+                return output, [prisma_schema]
+        
         return None
     
-    lines = ["# Database Schema (from SQLAlchemy models)", ""]
-    
-    for model_file in model_files:
-        try:
-            content = model_file.read_text()
-            tree = ast.parse(content)
+    def _from_sqlalchemy(self) -> Optional[Tuple[str, List[Path]]]:
+        """Extract from SQLAlchemy models."""
+        model_files = []
+        
+        for py_file in self.root.rglob("*.py"):
+            if "model" not in py_file.name.lower():
+                continue
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            if "from sqlalchemy" in content or "declarative_base" in content:
+                model_files.append(py_file)
+        
+        if not model_files:
+            return None
+        
+        lines = ["# Database Schema (from SQLAlchemy models)", ""]
+        
+        for model_file in model_files:
+            content = safe_read_text(model_file)
+            if not content:
+                continue
+            
+            try:
+                tree = ast.parse(content)
+            except Exception:
+                continue
             
             for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    has_tablename = any(
-                        isinstance(item, ast.Assign) and 
-                        any(isinstance(t, ast.Name) and t.id == "__tablename__" for t in item.targets)
-                        for item in node.body
-                    )
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                
+                has_tablename = False
+                for item in node.body:
+                    if isinstance(item, ast.Assign):
+                        for target in item.targets:
+                            if isinstance(target, ast.Name):
+                                if target.id == "__tablename__":
+                                    has_tablename = True
+                
+                has_base = False
+                for base in node.bases:
+                    if isinstance(base, ast.Name) and "Base" in base.id:
+                        has_base = True
+                
+                if has_tablename or has_base:
+                    rel_path = model_file.relative_to(self.root)
+                    lines.append(f"\n## {rel_path} - Table: {node.name}")
                     
-                    if has_tablename or any(isinstance(base, ast.Name) and "Base" in base.id for base in node.bases):
-                        rel_path = model_file.relative_to(self.root)
-                        lines.append(f"\n## {rel_path} — Table: {node.name}")
-                        
-                        for item in node.body:
-                            if isinstance(item, ast.Assign):
-                                try:
-                                    source = ast.unparse(item)
-                                    if "Column(" in source or "relationship(" in source:
-                                        lines.append(f"  {source}")
-                                except Exception:
-                                    pass
-                        lines.append("")
-        except Exception:
-            continue
-    
-    return "\n".join(lines) if len(lines) > 2 else None, model_files
-
-def _from_django_models(self) -> Optional[tuple[str, list[Path]]]:
-    """Parse Django models."""
-    lines = ["# Database Schema (from Django models)", ""]
-    found_models = False
-    model_files = []
-    
-    for py_file in self.root.rglob("models.py"):
-        if _should_skip_path(py_file):
-            continue
+                    for item in node.body:
+                        if isinstance(item, ast.Assign):
+                            try:
+                                source = ast.unparse(item)
+                                if "Column(" in source or "relationship(" in source:
+                                    lines.append(f"  {source}")
+                            except Exception:
+                                pass
+                    lines.append("")
         
-        try:
-            content = py_file.read_text()
+        if len(lines) <= 2:
+            return None
+        
+        return "\n".join(lines), model_files
+    
+    def _from_django(self) -> Optional[Tuple[str, List[Path]]]:
+        """Extract from Django models."""
+        lines = ["# Database Schema (from Django models)", ""]
+        model_files = []
+        found = False
+        
+        for py_file in self.root.rglob("models.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
             if "from django.db import models" not in content:
                 continue
             
-            tree = ast.parse(content)
-            
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    if any(isinstance(base, ast.Attribute) and base.attr == "Model" for base in node.bases):
-                        found_models = True
-                        model_files.append(py_file)
-                        rel_path = py_file.relative_to(self.root)
-                        lines.append(f"\n## {rel_path} — Model: {node.name}")
-                        
-                        for item in node.body:
-                            if isinstance(item, ast.Assign):
-                                try:
-                                    source = ast.unparse(item)
-                                    if "models." in source:
-                                        lines.append(f"  {source}")
-                                except Exception:
-                                    pass
-                        lines.append("")
-        except Exception:
-            continue
-    
-    return ("\n".join(lines), model_files) if found_models else None
-
-def _from_typeorm_entities(self) -> Optional[tuple[str, list[Path]]]:
-    """Extract TypeORM entities."""
-    lines = ["# Database Schema (from TypeORM entities)", ""]
-    found_entities = False
-    entity_files = []
-    
-    entity_pattern = re.compile(r'@Entity\([^)]*\)\s*export\s+class\s+(\w+)\s*\{([^}]+)\}', re.DOTALL)
-    column_pattern = re.compile(r'@(Column|PrimaryGeneratedColumn|ManyToOne|OneToMany|ManyToMany)\([^)]*\)')
-    
-    for ts_file in self.root.rglob("*.ts"):
-        if _should_skip_path(ts_file) or "entity" not in ts_file.name.lower():
-            continue
-        
-        try:
-            content = ts_file.read_text()
-            if "@Entity" not in content:
+            try:
+                tree = ast.parse(content)
+            except Exception:
                 continue
             
-            matches = entity_pattern.findall(content)
-            if matches:
-                found_entities = True
-                entity_files.append(ts_file)
-                rel_path = ts_file.relative_to(self.root)
-                lines.append(f"\n## {rel_path}")
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
                 
-                for class_name, body in matches:
-                    lines.append(f"\n### Entity: {class_name}")
+                is_model = False
+                for base in node.bases:
+                    if isinstance(base, ast.Attribute) and base.attr == "Model":
+                        is_model = True
+                
+                if is_model:
+                    found = True
+                    model_files.append(py_file)
+                    rel_path = py_file.relative_to(self.root)
+                    lines.append(f"\n## {rel_path} - Model: {node.name}")
                     
-                    for line in body.split('\n'):
-                        line = line.strip()
-                        if column_pattern.search(line) or line.startswith('@'):
-                            lines.append(f"  {line}")
+                    for item in node.body:
+                        if isinstance(item, ast.Assign):
+                            try:
+                                source = ast.unparse(item)
+                                if "models." in source:
+                                    lines.append(f"  {source}")
+                            except Exception:
+                                pass
                     lines.append("")
-        except Exception:
-            continue
-    
-    return ("\n".join(lines), entity_files) if found_entities else None
-
-def _from_live_db(self) -> Optional[tuple[str, list[Path]]]:
-    """Connect to live database and extract schema."""
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        return None
-    
-    try:
-        if db_url.startswith("postgres"):
-            result = subprocess.run(
-                ["pg_dump", "--schema-only", db_url],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                return f"# Database Schema (from live PostgreSQL)\n\n```sql\n{result.stdout}\n```", []
         
-        elif "mysql" in db_url:
-            import urllib.parse
-            parsed = urllib.parse.urlparse(db_url)
-            cmd = ["mysqldump", "--no-data", f"-h{parsed.hostname}", f"-u{parsed.username}"]
-            if parsed.password:
-                cmd.append(f"-p{parsed.password}")
-            cmd.append(parsed.path.lstrip('/'))
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                return f"# Database Schema (from live MySQL)\n\n```sql\n{result.stdout}\n```", []
-    except Exception as e:
-        print(f"  ⚠ Could not extract live DB schema: {e}")
-    
-    return None
+        if not found:
+            return None
+        
+        return "\n".join(lines), model_files
+
 
 class APIContractExtractor:
-"""Extract API contracts from code or spec files."""
-def __init__(self, root: Path):
-    self.root = root
+    """Extract API contracts from spec files."""
+    
+    def __init__(self, root: Path):
+        self.root = root
+    
+    def extract(self) -> Optional[Tuple[str, List[Path]]]:
+        """Extract API contract."""
+        openapi_files = [
+            "openapi.yaml", "openapi.yml", "openapi.json",
+            "swagger.yaml", "swagger.yml", "swagger.json",
+            "api-spec.yaml", "api-spec.yml",
+        ]
+        
+        for spec_file in openapi_files:
+            path = self.root / spec_file
+            if path.exists():
+                content = safe_read_text(path)
+                if content:
+                    output = f"# API Contract\n\n```yaml\n{content}\n```"
+                    return output, [path]
+        
+        graphql_files = ["schema.graphql", "schema.gql"]
+        for gql_file in graphql_files:
+            path = self.root / gql_file
+            if path.exists():
+                content = safe_read_text(path)
+                if content:
+                    output = f"# GraphQL Schema\n\n```graphql\n{content}\n```"
+                    return output, [path]
+        
+        api_docs = ["API.md", "api/README.md", "docs/api.md"]
+        for doc_file in api_docs:
+            path = self.root / doc_file
+            if path.exists():
+                content = safe_read_text(path)
+                if content:
+                    output = f"# API Documentation\n\n{content}"
+                    return output, [path]
+        
+        return None
 
-def extract(self) -> Optional[tuple[str, list[Path]]]:
-    """Extract API contract if available."""
-    for spec_file in ["openapi.yaml", "openapi.json", "swagger.yaml", "swagger.json", "api-spec.yaml"]:
-        path = self.root / spec_file
-        if path.exists():
-            content = path.read_text()
-            return f"# API Contract\n\n```yaml\n{content}\n```", [path]
-    
-    for schema_file in ["schema.graphql", "schema.gql"]:
-        path = self.root / schema_file
-        if path.exists():
-            content = path.read_text()
-            return f"# GraphQL Schema\n\n```graphql\n{content}\n```", [path]
-    
-    for doc_file in ["API.md", "api/README.md", "docs/api.md"]:
-        path = self.root / doc_file
-        if path.exists():
-            content = path.read_text()
-            return f"# API Documentation\n\n{content}", [path]
-    
-    return None
 
 class ScaffoldGenerator:
-"""Generate CLAUDE.md and ARCHITECTURE.md scaffolds."""
-def __init__(self, project: ProjectInfo):
-    self.project = project
+    """Generate CLAUDE.md and ARCHITECTURE.md scaffolds."""
+    
+    def __init__(self, project: ProjectInfo):
+        self.project = project
+    
+    def generate_claude_md(self) -> str:
+        """Generate enhanced CLAUDE.md."""
+        enhancer = ClaudeMdEnhancer(self.project.root)
+        return enhancer.generate_enhanced_claude_md(self.project)
+    
+    def generate_architecture_md(self) -> str:
+        """Generate ARCHITECTURE.md scaffold."""
+        p = self.project
+        
+        lines = []
+        lines.append(f"# Architecture Overview - {p.name}")
+        lines.append("")
+        lines.append("## System Context")
+        lines.append("<!-- TODO: What does this system do? What are its boundaries? -->")
+        lines.append("```")
+        lines.append("[External Client] -> [This System] -> [External Dependencies]")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Request Flow")
+        lines.append("<!-- TODO: Trace a typical request through the system -->")
+        lines.append("```")
+        lines.append("Request -> ??? -> Response")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Directory -> Responsibility Mapping")
+        lines.append("<!-- TODO: Fill in based on your project structure -->")
+        lines.append("| Directory | Purpose | Key Patterns |")
+        lines.append("|-----------|---------|--------------|")
+        lines.append("| TODO      | TODO    | TODO         |")
+        lines.append("")
+        lines.append("## Data Model")
+        lines.append("<!-- TODO: Key entities and their relationships -->")
+        lines.append("```")
+        lines.append("Entity A --1:N--> Entity B --N:M--> Entity C")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Key Design Decisions")
+        lines.append(f"- **Why {p.framework}?**: TODO")
+        lines.append("- **Why this architecture?**: TODO")
+        lines.append("")
+        lines.append("## Infrastructure")
+        
+        if p.has_docker:
+            lines.append("- Docker: Yes")
+        else:
+            lines.append("- Docker: No")
+        
+        if p.has_ci:
+            lines.append("- CI/CD: Configured")
+        else:
+            lines.append("- CI/CD: Not configured")
+        
+        if p.has_tests:
+            lines.append("- Tests: Present")
+        else:
+            lines.append("- Tests: Not found")
+        
+        lines.append("")
+        lines.append("## External Dependencies")
+        lines.append("<!-- TODO: APIs, databases, services this connects to -->")
+        lines.append("- TODO: List external systems")
+        lines.append("")
+        
+        return "\n".join(lines)
 
-def generate_claude_md(self) -> str:
-    """Generate enhanced CLAUDE.md with auto-detection."""
-    enhancer = ClaudeMdEnhancer(self.project.root)
-    return enhancer.generate_enhanced_claude_md(self.project)
 
-def generate_architecture_md(self) -> str:
-    p = self.project
-    return f"""# Architecture Overview — {p.name}
-
-
-    ## System Context
-<!-- TODO: Fill in based on your project structure -->
-
-## Data Model
-<!-- TODO: Key entities and their relationships -->
-## Entity A ──1:N──▶ Entity B ──N:M──▶ Entity C
-
-## Key Design Decisions
-<!-- TODO: Why did you make the choices you made? -->
-# Why {p.framework}?: TODO
-# Why this architecture?: TODO
-
-## Infrastructure
-{"- Docker: Yes" if p.has_docker else "- Docker: No"}
-{"- CI/CD: Configured" if p.has_ci else "- CI/CD: Not configured"}
-{"- Tests: Present" if p.has_tests else "- Tests: Not found"}
-
-## External Dependencies
-<!-- TODO: APIs, databases, services this connects to -->
-### TODO: List external systems
-"""
 class ModuleSummaryGenerator:
-"""Generate per-module summaries using an LLM."""
-def __init__(self, root: Path, config: dict):
-    self.root = root
-    self.config = config
-    self.client = None
-
-def _get_client(self):
-    if self.client:
-        return self.client
-
-    provider = self.config["llm_summaries"]["provider"]
-
-    if provider == "anthropic":
-        try:
-            from anthropic import Anthropic
-            self.client = Anthropic()
+    """Generate module summaries using LLM."""
+    
+    def __init__(self, root: Path, config: dict):
+        self.root = root
+        self.config = config
+        self.client = None
+    
+    def _get_client(self):
+        """Get LLM client."""
+        if self.client:
             return self.client
-        except ImportError:
-            print("  ⚠ pip install anthropic required for LLM summaries")
-            return None
-    elif provider == "openai":
-        try:
-            from openai import OpenAI
-            self.client = OpenAI()
-            return self.client
-        except ImportError:
-            print("  ⚠ pip install openai required for LLM summaries")
-            return None
-
-def generate(self, languages: list[str]) -> dict[str, tuple[str, list[Path]]]:
-    """Generate summaries for all modules."""
-    client = self._get_client()
-    if not client:
-        return {}
-
-    results = {}
-    extensions = {
-        "python": "*.py", "typescript": "*.ts",
-        "javascript": "*.js", "rust": "*.rs", "go": "*.go",
-        "csharp": "*.cs",
-    }
-
-    files_to_summarize = []
-    for lang in languages:
-        if lang in extensions:
+        
+        provider = self.config["llm_summaries"]["provider"]
+        
+        if provider == "anthropic":
+            try:
+                from anthropic import Anthropic
+                self.client = Anthropic()
+                return self.client
+            except ImportError:
+                print("  Warning: pip install anthropic for LLM summaries")
+                return None
+        elif provider == "openai":
+            try:
+                from openai import OpenAI
+                self.client = OpenAI()
+                return self.client
+            except ImportError:
+                print("  Warning: pip install openai for LLM summaries")
+                return None
+        
+        return None
+    
+    def generate(self, languages: List[str]) -> Dict[str, Tuple[str, List[Path]]]:
+        """Generate summaries for modules."""
+        client = self._get_client()
+        if not client:
+            return {}
+        
+        results = {}
+        
+        extensions = {
+            "python": "*.py",
+            "typescript": "*.ts",
+            "javascript": "*.js",
+            "rust": "*.rs",
+            "go": "*.go",
+            "csharp": "*.cs",
+        }
+        
+        files_to_summarize = []
+        
+        for lang in languages:
+            if lang not in extensions:
+                continue
             for f in self.root.rglob(extensions[lang]):
-                if not _should_skip_path(f):
-                    try:
-                        size = f.stat().st_size
-                        min_size = self.config["llm_summaries"].get("min_file_size_bytes", 300)
-                        if size > min_size and size < 100_000:
-                            files_to_summarize.append(f)
-                    except Exception:
-                        continue
-
-    max_modules = self.config["llm_summaries"].get("max_modules", 30)
-    files_to_summarize.sort(key=lambda f: f.stat().st_size, reverse=True)
-    files_to_summarize = files_to_summarize[:max_modules]
-
-    if files_to_summarize:
+                if should_skip_path(f):
+                    continue
+                try:
+                    size = f.stat().st_size
+                    min_size = self.config["llm_summaries"].get("min_file_size_bytes", 300)
+                    if size > min_size and size < 100000:
+                        files_to_summarize.append(f)
+                except Exception:
+                    continue
+        
+        max_modules = self.config["llm_summaries"].get("max_modules", 30)
+        files_to_summarize.sort(key=lambda f: f.stat().st_size, reverse=True)
+        files_to_summarize = files_to_summarize[:max_modules]
+        
+        if not files_to_summarize:
+            return {}
+        
         progress = ProgressIndicator(len(files_to_summarize), "Summarizing modules")
         
         for filepath in files_to_summarize:
-            rel = filepath.relative_to(self.root)
-            
             try:
-                source = filepath.read_text(errors="ignore")
-                if len(source) > 20_000:
-                    source = source[:20_000] + "\n... [truncated]"
-
+                rel = filepath.relative_to(self.root)
+                source = safe_read_text(filepath)
+                if not source:
+                    progress.update()
+                    continue
+                
+                if len(source) > 20000:
+                    source = source[:20000] + "\n... [truncated]"
+                
                 summary = self._call_llm(client, str(rel), source)
                 if summary:
                     key = str(rel).replace("/", "__").replace("\\", "__")
-                    key = re.sub(r'\.\w+$', '.md', key)
+                    key = re.sub(r"\.\w+$", ".md", key)
                     content = f"# Module: {rel}\n\n{summary}\n"
                     results[key] = (content, [filepath])
             except Exception as e:
-                print(f"\n  ⚠ Error summarizing {rel}: {e}")
+                print(f"\n  Warning: Error summarizing {filepath}: {e}")
             
             progress.update()
         
         progress.finish()
-
-    return results
-
+        
+        return results
+    
 def _call_llm(self, client, filepath: str, source: str) -> Optional[str]:
-    prompt = textwrap.dedent(f"""\
-    Analyze this source module and produce a concise summary:
-    Purpose: One sentence.
-    Public Interface: Key functions/classes with brief descriptions.
-    Dependencies: Internal and external dependencies.
-    Key Patterns: Design patterns, invariants, gotchas.
-    State/Data Flow: How data moves through this module.
-    Be precise and concise. This will help another LLM understand and modify this code.
-
-    File: {filepath}
-    {source}
-    """)
+    """Call LLM for summary."""
 
     provider = self.config["llm_summaries"]["provider"]
     model = self.config["llm_summaries"]["model"]
 
-        if provider == "anthropic":
-            response = client.messages.create(
-                model=model,
-                max_tokens=1200,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text
-        elif provider == "openai":
-            response = client.chat.completions.create(
-                model=model,
-                max_tokens=1200,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.choices[0].message.content
+    prompt = f"""
+Analyze this source module and produce a concise summary.
+
+File: {filepath}
+
+Source Code:
+{source}
+
+Provide:
+
+1. Purpose — one sentence describing the module.
+2. Public Interface — key classes/functions with short descriptions.
+3. Dependencies — internal and external dependencies.
+4. Key Patterns — design patterns, invariants, or gotchas.
+5. State/Data Flow — how data moves through the module.
+
+Be precise and concise.
+"""
+
+    if provider == "anthropic":
+        response = client.messages.create(
+            model=model,
+            max_tokens=1200,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+        )
+        return response.content[0].text
+
+    elif provider == "openai":
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1200,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+        )
+        return response.choices[0].message.content
+
+    return None
 
 
-# ──────────────────────────────────────────────
-# Main Orchestrator with Incremental Updates
-# ──────────────────────────────────────────────
+class DiagnosticTool:
+    """Run diagnostics on the project."""
+    
+    def __init__(self, root: Path):
+        self.root = root
+    
+    def run(self) -> None:
+        """Run all diagnostics."""
+        print("")
+        print("=" * 60)
+        print("  LLM Context Generator - Diagnostics")
+        print("=" * 60)
+        print("")
+        
+        self._check_environment()
+        self._check_project()
+        self._check_context()
+        self._check_security()
+        self._recommendations()
+    
+    def _check_environment(self) -> None:
+        """Check system environment."""
+        print("-> Environment Check")
+        print(f"  Python: {sys.version.split()[0]}")
+        print(f"  Platform: {sys.platform}")
+        
+        optional_deps = [
+            ("yaml", "pyyaml", "YAML config"),
+            ("anthropic", "anthropic", "Anthropic AI"),
+            ("openai", "openai", "OpenAI"),
+            ("watchdog", "watchdog", "Watch mode"),
+        ]
+        
+        for module, package, feature in optional_deps:
+            try:
+                __import__(module)
+                print(f"  {feature}: installed")
+            except ImportError:
+                print(f"  {feature}: not installed (pip install {package})")
+        
+        print("")
+    
+    def _check_project(self) -> None:
+        """Check project structure."""
+        print("-> Project Check")
+        
+        detector = ProjectDetector(self.root)
+        project = detector.detect()
+        
+        print(f"  Name: {project.name}")
+        print(f"  Languages: {', '.join(project.languages) or 'None detected'}")
+        print(f"  Framework: {project.framework}")
+        print(f"  Package Manager: {project.package_manager or 'Unknown'}")
+        print(f"  Has Docker: {'Yes' if project.has_docker else 'No'}")
+        print(f"  Has CI/CD: {'Yes' if project.has_ci else 'No'}")
+        print(f"  Has Tests: {'Yes' if project.has_tests else 'No'}")
+        print("")
+    
+    def _check_context(self) -> None:
+        """Check generated context."""
+        print("-> Generated Context Check")
+        
+        context_dir = self.root / ".llm-context"
+        if not context_dir.exists():
+            print("  Status: No context generated yet")
+            print("  Run: python llm-context-setup.py")
+            print("")
+            return
+        
+        manifest = GenerationManifest.load(self.root)
+        if manifest:
+            print(f"  Last generated: {manifest.generated_at}")
+            print(f"  Files tracked: {len(manifest.files)}")
+            
+            total_size = 0
+            for f in context_dir.rglob("*"):
+                if f.is_file():
+                    total_size += f.stat().st_size
+            print(f"  Total size: {human_readable_size(total_size)}")
+        else:
+            print("  Status: Manifest missing or outdated")
+        
+        print("")
+    
+    def _check_security(self) -> None:
+        """Check security configuration."""
+        print("-> Security Check")
+        
+        config = load_config(self.root)
+        security = SecurityManager(self.root, config)
+        
+        print(f"  Mode: {security.mode}")
+        print(f"  Secret Redaction: {'Enabled' if security.redact_secrets else 'Disabled'}")
+        print(f"  Audit Logging: {'Enabled' if security.audit_enabled else 'Disabled'}")
+        print("")
+    
+    def _recommendations(self) -> None:
+        """Print recommendations."""
+        print("-> Recommendations")
+        
+        recommendations = []
+        
+        if not (self.root / "CLAUDE.md").exists():
+            recommendations.append("Create CLAUDE.md to capture project conventions")
+        
+        if not (self.root / "ARCHITECTURE.md").exists():
+            recommendations.append("Create ARCHITECTURE.md to document system design")
+        
+        config_exists = (
+            (self.root / "llm-context.yml").exists()
+            or (self.root / "llm-context.json").exists()
+        )
+        if not config_exists:
+            recommendations.append("Create llm-context.yml for custom settings")
+        
+        if not (self.root / ".git").exists():
+            recommendations.append("Initialize git for version control")
+        
+        if recommendations:
+            for i, rec in enumerate(recommendations, 1):
+                print(f"  {i}. {rec}")
+        else:
+            print("  All checks passed!")
+        
+        print("")
+
 
 class LLMContextGenerator:
-    """Main orchestrator with smart incremental updates."""
-
-    def __init__(self, root: Path, config: Optional[dict] = None, quick_mode: bool = False, force: bool = False):
+    """Main orchestrator."""
+    
+    def __init__(
+        self,
+        root: Path,
+        config: Optional[dict] = None,
+        quick_mode: bool = False,
+        force: bool = False,
+    ):
         self.root = root
         self.config = config or load_config(self.root)
         self.output_dir = self.root / self.config["output_dir"]
         self.quick_mode = quick_mode
         self.updater = SmartUpdater(self.root, self.config, force=force)
-
-    def generate(self):
-        mode = "Quick update" if self.quick_mode else "Force regeneration" if self.updater.force else "Incremental update" if self.updater.old_manifest else "Full generation"
+        self.security = SecurityManager(self.root, self.config)
+    
+    def generate(self) -> None:
+        """Generate all context files."""
+        if self.quick_mode:
+            mode = "Quick update"
+        elif self.updater.force:
+            mode = "Force regeneration"
+        elif self.updater.old_manifest:
+            mode = "Incremental update"
+        else:
+            mode = "Full generation"
         
-        print(f"\n{'='*60}")
+        print("")
+        print("=" * 60)
         print(f"  LLM Context Generator v{VERSION}")
         print(f"  Project: {self.root}")
         print(f"  Mode: {mode}")
-        print(f"{'='*60}\n")
-
-        print("→ Detecting project type...")
+        print(f"  Security: {self.security.mode}")
+        print("=" * 60)
+        print("")
+        
+        print("-> Detecting project type...")
         detector = ProjectDetector(self.root)
         project = detector.detect()
-
+        
         print(f"  Name: {project.name}")
         print(f"  Languages: {', '.join(project.languages) or 'unknown'}")
         print(f"  Framework: {project.framework}")
+        
         if self.updater.old_manifest:
             print(f"  Last generated: {self.updater.old_manifest.generated_at}")
-        print()
-
+        print("")
+        
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
+        
         gen = self.config["generate"]
-
+        
         if self.quick_mode:
-            gen = {k: v for k, v in gen.items() if k not in ['module_summaries', 'db_schema']}
-
+            skip_keys = ["module_summaries", "db_schema"]
+            gen = {k: v for k, v in gen.items() if k not in skip_keys}
+        
         if gen.get("tree"):
-            should_regen, reason = self.updater.should_regenerate("tree.txt")
-            if should_regen:
-                print(f"→ Generating file tree... ({reason})")
-                tree, sources = TreeGenerator(self.root, self.config).generate()
-                self._write("tree.txt", tree)
-                self.updater.mark_generated("tree.txt", tree, sources)
-            else:
-                print(f"  ✓ tree.txt ({reason})")
-                self.updater.mark_skipped("tree.txt")
-
+            self._generate_tree()
+        
         if gen.get("schemas"):
-            print("→ Checking schemas/types...")
-            extractor = SchemaExtractor(self.root, project.languages)
-            schemas = extractor.extract()
-            
-            for filename, (content, sources) in schemas.items():
-                if not content.strip():
-                    continue
-                
-                should_regen, reason = self.updater.should_regenerate(filename, sources)
-                if should_regen:
-                    print(f"  Extracting {filename}... ({reason})")
-                    self._write(filename, content)
-                    self.updater.mark_generated(filename, content, sources)
-                else:
-                    print(f"  ✓ {filename} ({reason})")
-                    self.updater.mark_skipped(filename)
-
-        if gen.get("routes") or gen.get("public_api"):
-            api = APIExtractor(self.root, project.languages, project.framework)
-
-            if gen.get("routes"):
-                routes, sources = api.extract_routes()
-                if routes:
-                    should_regen, reason = self.updater.should_regenerate("routes.txt", sources)
-                    if should_regen:
-                        print(f"→ Extracting routes... ({reason})")
-                        self._write("routes.txt", routes)
-                        self.updater.mark_generated("routes.txt", routes, sources)
-                    else:
-                        print(f"  ✓ routes.txt ({reason})")
-                        self.updater.mark_skipped("routes.txt")
-
-            if gen.get("public_api"):
-                public_api, sources = api.extract_public_api()
-                if public_api:
-                    should_regen, reason = self.updater.should_regenerate("public-api.txt", sources)
-                    if should_regen:
-                        print(f"→ Extracting public API... ({reason})")
-                        self._write("public-api.txt", public_api)
-                        self.updater.mark_generated("public-api.txt", public_api, sources)
-                    else:
-                        print(f"  ✓ public-api.txt ({reason})")
-                        self.updater.mark_skipped("public-api.txt")
-
+            self._generate_schemas(project)
+        
+        if gen.get("routes"):
+            self._generate_routes(project)
+        
+        if gen.get("public_api"):
+            self._generate_public_api(project)
+        
         if gen.get("dependencies"):
-            analyzer = DependencyAnalyzer(self.root, project.languages)
-            deps, sources = analyzer.analyze()
-            
-            if deps:
-                should_regen, reason = self.updater.should_regenerate("dependency-graph.txt", sources)
-                if should_regen:
-                    print(f"→ Analyzing dependencies... ({reason})")
-                    self._write("dependency-graph.txt", deps)
-                    self.updater.mark_generated("dependency-graph.txt", deps, sources)
-                    
-                    if gen.get("dependency_graph_mermaid"):
-                        visualizer = DependencyGraphVisualizer()
-                        mermaid = visualizer.generate_mermaid(deps)
-                        self._write("dependency-graph.md", mermaid)
-                        self.updater.mark_generated("dependency-graph.md", mermaid, sources)
-                else:
-                    print(f"  ✓ dependency-graph.txt ({reason})")
-                    self.updater.mark_skipped("dependency-graph.txt")
-                    if gen.get("dependency_graph_mermaid"):
-                        self.updater.mark_skipped("dependency-graph.md")
-
+            self._generate_dependencies(project, gen)
+        
+        if gen.get("symbol_index"):
+            self._generate_symbol_index(project)
+        
+        if gen.get("entry_points"):
+            self._generate_entry_points(project)
+        
         if gen.get("db_schema"):
-            extractor = DatabaseSchemaExtractor(self.root)
-            result = extractor.extract()
-            
-            if result:
-                schema, sources = result
-                should_regen, reason = self.updater.should_regenerate("db-schema.sql", sources)
-                if should_regen:
-                    print(f"→ Extracting database schema... ({reason})")
-                    self._write("db-schema.sql", schema)
-                    self.updater.mark_generated("db-schema.sql", schema, sources)
-                else:
-                    print(f"  ✓ db-schema.sql ({reason})")
-                    self.updater.mark_skipped("db-schema.sql")
-
+            self._generate_db_schema()
+        
         if gen.get("api_contract"):
-            extractor = APIContractExtractor(self.root)
-            result = extractor.extract()
-            
-            if result:
-                content, sources = result
-                should_regen, reason = self.updater.should_regenerate("api-contract.md", sources)
-                if should_regen:
-                    print(f"→ Extracting API contract... ({reason})")
-                    self._write("api-contract.md", content)
-                    self.updater.mark_generated("api-contract.md", content, sources)
-                else:
-                    print(f"  ✓ api-contract.md ({reason})")
-                    self.updater.mark_skipped("api-contract.md")
-
+            self._generate_api_contract()
+        
         if gen.get("env_shape"):
-            for env_file in [".env.example", ".env.template", ".env.sample"]:
-                env_path = self.root / env_file
-                if env_path.exists():
-                    should_regen, reason = self.updater.should_regenerate("env-shape.txt", [env_path])
-                    if should_regen:
-                        print(f"→ Copying {env_file}... ({reason})")
-                        content = env_path.read_text(errors="ignore")
-                        self._write("env-shape.txt", content)
-                        self.updater.mark_generated("env-shape.txt", content, [env_path])
-                    else:
-                        print(f"  ✓ env-shape.txt ({reason})")
-                        self.updater.mark_skipped("env-shape.txt")
-                    break
-
-        if gen.get("dependencies"):
-            for dep_file in ["requirements.txt", "pyproject.toml", "package.json", "Cargo.toml", "go.mod", "Gemfile"]:
-                dep_path = self.root / dep_file
-                if dep_path.exists():
-                    should_regen, reason = self.updater.should_regenerate(dep_file, [dep_path])
-                    if should_regen:
-                        print(f"→ Copying {dep_file}... ({reason})")
-                        content = dep_path.read_text(errors="ignore")
-                        self._write(dep_file, content)
-                        self.updater.mark_generated(dep_file, content, [dep_path])
-                    else:
-                        print(f"  ✓ {dep_file} ({reason})")
-                        self.updater.mark_skipped(dep_file)
-
+            self._generate_env_shape()
+        
+        self._copy_dependency_files()
+        
         if gen.get("recent_activity"):
-            print("→ Capturing recent git activity...")
-            try:
-                log = subprocess.run(
-                    ["git", "log", "--oneline", "-20"],
-                    capture_output=True, text=True, cwd=self.root
-                )
-                if log.returncode == 0:
-                    self._write("recent-commits.txt", log.stdout)
-                    self.updater.mark_generated("recent-commits.txt", log.stdout)
-
-                diff = subprocess.run(
-                    ["git", "diff", "--stat", "HEAD~5"],
-                    capture_output=True, text=True, cwd=self.root
-                )
-                if diff.returncode == 0:
-                    self._write("recent-changes.txt", diff.stdout)
-                    self.updater.mark_generated("recent-changes.txt", diff.stdout)
-            except Exception:
-                pass
-
+            self._generate_recent_activity()
+        
         if gen.get("claude_md_scaffold"):
-            claude_path = self.root / "CLAUDE.md"
-            should_regen, reason = self.updater.should_regenerate("../CLAUDE.md")
-            
-            if should_regen:
-                print(f"→ Generating enhanced CLAUDE.md scaffold... ({reason})")
-                scaffold = ScaffoldGenerator(project)
-                content = scaffold.generate_claude_md()
-                claude_path.write_text(content)
-                self.updater.mark_generated("../CLAUDE.md", content, is_new=True)
-            else:
-                print(f"  ✓ CLAUDE.md ({reason})")
-                self.updater.mark_skipped("../CLAUDE.md")
-
+            self._generate_claude_md(project)
+        
         if gen.get("architecture_md_scaffold"):
-            arch_path = self.root / "ARCHITECTURE.md"
-            should_regen, reason = self.updater.should_regenerate("../ARCHITECTURE.md")
-            
-            if should_regen:
-                print(f"→ Generating ARCHITECTURE.md scaffold... ({reason})")
-                scaffold = ScaffoldGenerator(project)
-                content = scaffold.generate_architecture_md()
-                arch_path.write_text(content)
-                self.updater.mark_generated("../ARCHITECTURE.md", content, is_new=True)
-            else:
-                print(f"  ✓ ARCHITECTURE.md ({reason})")
-                self.updater.mark_skipped("../ARCHITECTURE.md")
-
+            self._generate_architecture_md(project)
+        
         if gen.get("module_summaries") and not self.quick_mode:
-            print("→ Generating LLM-powered module summaries...")
-            summary_gen = ModuleSummaryGenerator(self.root, self.config)
-            summaries = summary_gen.generate(project.languages)
-
-            modules_dir = self.output_dir / "modules"
-            modules_dir.mkdir(exist_ok=True)
-
-            for filename, (content, sources) in summaries.items():
-                module_path = f"modules/{filename}"
-                (modules_dir / filename).write_text(content)
-                self.updater.mark_generated(module_path, content, sources)
-
-            if summaries:
-                index = "# Module Summaries Index\n\n"
-                for f in sorted(summaries.keys()):
-                    index += f"- [{f}](modules/{f})\n"
-                self._write("module-index.md", index)
-                self.updater.mark_generated("module-index.md", index)
-
+            self._generate_module_summaries(project)
+        
         self.updater.new_manifest.save(self.root)
-
-        print(f"\n{'='*60}")
-        print(f"  ✅ Context generated in {self.output_dir}")
+        
+        self.security.log_audit("generate", {"mode": mode})
+        
+        print("")
+        print("=" * 60)
+        print(f"  Context generated in {self.output_dir}")
         self.updater.print_summary()
-
+        
         if self.updater.stats["regenerated"] > 0 or self.updater.stats["new"] > 0:
             print("Updated/new files:")
             for f in sorted(self.output_dir.rglob("*")):
                 if f.is_file():
                     rel = f.relative_to(self.output_dir)
-                    size = _human_size(f.stat().st_size)
-                    
+                    size = human_readable_size(f.stat().st_size)
                     entry = self.updater.new_manifest.get_entry(str(rel))
-                    if entry and entry.generated_at == self.updater.new_manifest.generated_at:
-                        print(f"  • {rel} ({size})")
-
-    def _write(self, filename: str, content: str):
-        """Write a file to the output directory."""
+                    if entry:
+                        if entry.generated_at == self.updater.new_manifest.generated_at:
+                            print(f"  - {rel} ({size})")
+    
+    def _write(self, filename: str, content: str) -> None:
+        """Write file to output directory."""
         if filename.startswith("../"):
             path = (self.output_dir / filename).resolve()
         else:
             path = self.output_dir / filename
+        safe_write_text(path, content)
+    
+    def _generate_tree(self) -> None:
+        """Generate file tree."""
+        should_regen, reason = self.updater.should_regenerate("tree.txt")
+        if should_regen:
+            print(f"-> Generating file tree... ({reason})")
+            tree, sources = TreeGenerator(self.root, self.config).generate()
+            self._write("tree.txt", tree)
+            self.updater.mark_generated("tree.txt", tree, sources)
+        else:
+            print(f"  tree.txt ({reason})")
+            self.updater.mark_skipped("tree.txt")
+    
+    def _generate_schemas(self, project: ProjectInfo) -> None:
+        """Generate schema extractions."""
+        print("-> Checking schemas/types...")
+        extractor = SchemaExtractor(self.root, project.languages)
+        schemas = extractor.extract()
         
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        for filename, (content, sources) in schemas.items():
+            if not content.strip():
+                continue
+            should_regen, reason = self.updater.should_regenerate(filename, sources)
+            if should_regen:
+                print(f"  Extracting {filename}... ({reason})")
+                self._write(filename, content)
+                self.updater.mark_generated(filename, content, sources)
+            else:
+                print(f"  {filename} ({reason})")
+                self.updater.mark_skipped(filename)
+    
+    def _generate_routes(self, project: ProjectInfo) -> None:
+        """Generate routes file."""
+        api = APIExtractor(self.root, project.languages, project.framework)
+        routes, sources = api.extract_routes()
+        
+        if routes:
+            should_regen, reason = self.updater.should_regenerate("routes.txt", sources)
+            if should_regen:
+                print(f"-> Extracting routes... ({reason})")
+                self._write("routes.txt", routes)
+                self.updater.mark_generated("routes.txt", routes, sources)
+            else:
+                print(f"  routes.txt ({reason})")
+                self.updater.mark_skipped("routes.txt")
+    
+    def _generate_public_api(self, project: ProjectInfo) -> None:
+        """Generate public API file."""
+        api = APIExtractor(self.root, project.languages, project.framework)
+        public_api, sources = api.extract_public_api()
+        
+        if public_api:
+            should_regen, reason = self.updater.should_regenerate("public-api.txt", sources)
+            if should_regen:
+                print(f"-> Extracting public API... ({reason})")
+                self._write("public-api.txt", public_api)
+                self.updater.mark_generated("public-api.txt", public_api, sources)
+            else:
+                print(f"  public-api.txt ({reason})")
+                self.updater.mark_skipped("public-api.txt")
+    
+    def _generate_dependencies(self, project: ProjectInfo, gen: dict) -> None:
+        """Generate dependency analysis."""
+        analyzer = DependencyAnalyzer(self.root, project.languages)
+        deps, sources = analyzer.analyze()
+        
+        if deps:
+            should_regen, reason = self.updater.should_regenerate(
+                "dependency-graph.txt", sources
+            )
+            if should_regen:
+                print(f"-> Analyzing dependencies... ({reason})")
+                self._write("dependency-graph.txt", deps)
+                self.updater.mark_generated("dependency-graph.txt", deps, sources)
+                
+                if gen.get("dependency_graph_mermaid"):
+                    visualizer = DependencyGraphVisualizer()
+                    mermaid = visualizer.generate_mermaid(deps)
+                    self._write("dependency-graph.md", mermaid)
+                    self.updater.mark_generated("dependency-graph.md", mermaid, sources)
+            else:
+                print(f"  dependency-graph.txt ({reason})")
+                self.updater.mark_skipped("dependency-graph.txt")
+                if gen.get("dependency_graph_mermaid"):
+                    self.updater.mark_skipped("dependency-graph.md")
+    
+    def _generate_symbol_index(self, project: ProjectInfo) -> None:
+        """Generate symbol index."""
+        indexer = SymbolIndexGenerator(self.root, project.languages)
+        symbols, sources = indexer.generate()
+        
+        should_regen, reason = self.updater.should_regenerate(
+            "symbol-index.json", sources
+        )
+        if should_regen:
+            print(f"-> Generating symbol index... ({reason})")
+            self._write("symbol-index.json", symbols)
+            self.updater.mark_generated("symbol-index.json", symbols, sources)
+        else:
+            print(f"  symbol-index.json ({reason})")
+            self.updater.mark_skipped("symbol-index.json")
+    
+    def _generate_entry_points(self, project: ProjectInfo) -> None:
+        """Generate entry points file."""
+        detector = EntryPointDetector(self.root, project.languages)
+        entry_points, sources = detector.detect()
+        
+        should_regen, reason = self.updater.should_regenerate(
+            "entry-points.json", sources
+        )
+        if should_regen:
+            print(f"-> Detecting entry points... ({reason})")
+            self._write("entry-points.json", entry_points)
+            self.updater.mark_generated("entry-points.json", entry_points, sources)
+        else:
+            print(f"  entry-points.json ({reason})")
+            self.updater.mark_skipped("entry-points.json")
+    
+    def _generate_db_schema(self) -> None:
+        """Generate database schema."""
+        extractor = DatabaseSchemaExtractor(self.root)
+        result = extractor.extract()
+        
+        if result:
+            schema, sources = result
+            should_regen, reason = self.updater.should_regenerate(
+                "db-schema.txt", sources
+            )
+            if should_regen:
+                print(f"-> Extracting database schema... ({reason})")
+                self._write("db-schema.txt", schema)
+                self.updater.mark_generated("db-schema.txt", schema, sources)
+            else:
+                print(f"  db-schema.txt ({reason})")
+                self.updater.mark_skipped("db-schema.txt")
+    
+    def _generate_api_contract(self) -> None:
+        """Generate API contract."""
+        extractor = APIContractExtractor(self.root)
+        result = extractor.extract()
+        
+        if result:
+            content, sources = result
+            should_regen, reason = self.updater.should_regenerate(
+                "api-contract.md", sources
+            )
+            if should_regen:
+                print(f"-> Extracting API contract... ({reason})")
+                self._write("api-contract.md", content)
+                self.updater.mark_generated("api-contract.md", content, sources)
+            else:
+                print(f"  api-contract.md ({reason})")
+                self.updater.mark_skipped("api-contract.md")
+    
+    def _generate_env_shape(self) -> None:
+        """Generate environment shape."""
+        env_files = [".env.example", ".env.template", ".env.sample"]
+        for env_file in env_files:
+            env_path = self.root / env_file
+            if env_path.exists():
+                should_regen, reason = self.updater.should_regenerate(
+                    "env-shape.txt", [env_path]
+                )
+                if should_regen:
+                    print(f"-> Copying {env_file}... ({reason})")
+                    content = safe_read_text(env_path) or ""
+                    content = self.security.redact_content(content)
+                    self._write("env-shape.txt", content)
+                    self.updater.mark_generated("env-shape.txt", content, [env_path])
+                else:
+                    print(f"  env-shape.txt ({reason})")
+                    self.updater.mark_skipped("env-shape.txt")
+                break
+    
+    def _copy_dependency_files(self) -> None:
+        """Copy dependency files."""
+        dep_files = [
+            "requirements.txt",
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "Gemfile",
+        ]
+        for dep_file in dep_files:
+            dep_path = self.root / dep_file
+            if dep_path.exists():
+                should_regen, reason = self.updater.should_regenerate(
+                    dep_file, [dep_path]
+                )
+                if should_regen:
+                    print(f"-> Copying {dep_file}... ({reason})")
+                    content = safe_read_text(dep_path) or ""
+                    self._write(dep_file, content)
+                    self.updater.mark_generated(dep_file, content, [dep_path])
+                else:
+                    print(f"  {dep_file} ({reason})")
+                    self.updater.mark_skipped(dep_file)
+    
+    def _generate_recent_activity(self) -> None:
+        """Generate recent git activity."""
+        print("-> Capturing recent git activity...")
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "-20"],
+                capture_output=True,
+                text=True,
+                cwd=self.root,
+            )
+            if result.returncode == 0:
+                self._write("recent-commits.txt", result.stdout)
+                self.updater.mark_generated("recent-commits.txt", result.stdout)
+            
+            result = subprocess.run(
+                ["git", "diff", "--stat", "HEAD~5"],
+                capture_output=True,
+                text=True,
+                cwd=self.root,
+            )
+            if result.returncode == 0:
+                self._write("recent-changes.txt", result.stdout)
+                self.updater.mark_generated("recent-changes.txt", result.stdout)
+        except Exception:
+            pass
+    
+    def _generate_claude_md(self, project: ProjectInfo) -> None:
+        """Generate CLAUDE.md scaffold."""
+        claude_path = self.root / "CLAUDE.md"
+        should_regen, reason = self.updater.should_regenerate("../CLAUDE.md")
+        
+        if should_regen:
+            print(f"-> Generating CLAUDE.md scaffold... ({reason})")
+            scaffold = ScaffoldGenerator(project)
+            content = scaffold.generate_claude_md()
+            safe_write_text(claude_path, content)
+            self.updater.mark_generated("../CLAUDE.md", content, is_new=True)
+        else:
+            print(f"  CLAUDE.md ({reason})")
+            self.updater.mark_skipped("../CLAUDE.md")
+    
+    def _generate_architecture_md(self, project: ProjectInfo) -> None:
+        """Generate ARCHITECTURE.md scaffold."""
+        arch_path = self.root / "ARCHITECTURE.md"
+        should_regen, reason = self.updater.should_regenerate("../ARCHITECTURE.md")
+        
+        if should_regen:
+            print(f"-> Generating ARCHITECTURE.md scaffold... ({reason})")
+            scaffold = ScaffoldGenerator(project)
+            content = scaffold.generate_architecture_md()
+            safe_write_text(arch_path, content)
+            self.updater.mark_generated("../ARCHITECTURE.md", content, is_new=True)
+        else:
+            print(f"  ARCHITECTURE.md ({reason})")
+            self.updater.mark_skipped("../ARCHITECTURE.md")
+    
+    def _generate_module_summaries(self, project: ProjectInfo) -> None:
+        """Generate LLM module summaries."""
+        if not self.security.is_ai_enabled():
+            print("-> Skipping module summaries (AI disabled in offline mode)")
+            return
+        
+        print("-> Generating LLM-powered module summaries...")
+        
+        summary_gen = ModuleSummaryGenerator(self.root, self.config)
+        summaries = summary_gen.generate(project.languages)
+        
+        modules_dir = self.output_dir / "modules"
+        modules_dir.mkdir(exist_ok=True)
+        
+        for filename, (content, sources) in summaries.items():
+            module_path = f"modules/{filename}"
+            safe_write_text(modules_dir / filename, content)
+            self.updater.mark_generated(module_path, content, sources)
+        
+        if summaries:
+            index_lines = ["# Module Summaries Index", ""]
+            for f in sorted(summaries.keys()):
+                index_lines.append(f"- [{f}](modules/{f})")
+            index = "\n".join(index_lines)
+            self._write("module-index.md", index)
+            self.updater.mark_generated("module-index.md", index)
 
 
-# ──────────────────────────────────────────────
-# Watch Mode
-# ──────────────────────────────────────────────
-
-def watch_mode(root: Path, config: dict):
-    """Enhanced watch mode with smarter debouncing."""
+def watch_mode(root: Path, config: dict) -> None:
+    """Watch for file changes and auto-update."""
     try:
         from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
     except ImportError:
-        print("  ⚠ Watch mode requires: pip install watchdog")
+        print("Watch mode requires: pip install watchdog")
         sys.exit(1)
     
-    class SmartContextUpdateHandler(FileSystemEventHandler):
+    class UpdateHandler(FileSystemEventHandler):
         def __init__(self):
             self.last_update = time.time()
-            self.pending_changes = set()
-            self.debounce_timer = None
+            self.pending = set()
+            self.timer = None
         
         def on_any_event(self, event):
-            """Handle any file system event."""
             if event.is_directory:
                 return
             
             path = Path(event.src_path)
             
-            if ".llm-context" in path.parts or _should_skip_path(path):
+            if ".llm-context" in path.parts:
+                return
+            if should_skip_path(path):
                 return
             
-            source_extensions = {'.py', '.ts', '.js', '.rs', '.go', '.cs', '.rb', '.java', '.jsx', '.tsx'}
-            if path.suffix not in source_extensions:
+            source_exts = {".py", ".ts", ".js", ".rs", ".go", ".cs", ".rb", ".java"}
+            if path.suffix not in source_exts:
                 return
             
             if not path.exists():
                 return
             
-            self.pending_changes.add(path)
+            self.pending.add(path)
             
-            if self.debounce_timer:
-                self.debounce_timer.cancel()
+            if self.timer:
+                self.timer.cancel()
             
-            self.debounce_timer = threading.Timer(2.0, self.process_changes)
-            self.debounce_timer.start()
+            self.timer = threading.Timer(2.0, self.process_changes)
+            self.timer.start()
         
         def process_changes(self):
-            """Process accumulated changes."""
-            if not self.pending_changes:
+            if not self.pending:
                 return
             
-            changes = self.pending_changes.copy()
-            self.pending_changes.clear()
+            changes = self.pending.copy()
+            self.pending.clear()
             
-            print(f"\n{'─'*60}")
-            print(f"  📝 Detected {len(changes)} file change(s)")
+            print("")
+            print("-" * 60)
+            print(f"  Detected {len(changes)} file change(s)")
             
             for p in sorted(list(changes)[:10]):
                 try:
                     rel_path = p.relative_to(root)
-                    print(f"     • {rel_path}")
+                    print(f"    - {rel_path}")
                 except ValueError:
-                    print(f"     • {p.name}")
+                    print(f"    - {p.name}")
             
             if len(changes) > 10:
-                print(f"     ... and {len(changes) - 10} more")
+                print(f"    ... and {len(changes) - 10} more")
             
-            print(f"{'─'*60}\n")
+            print("-" * 60)
+            print("")
             
             try:
                 generator = LLMContextGenerator(root, config, quick_mode=True)
                 generator.generate()
             except Exception as e:
-                print(f"  ❌ Error during update: {e}")
+                print(f"  Error during update: {e}")
             
             self.last_update = time.time()
     
-    handler = SmartContextUpdateHandler()
+    handler = UpdateHandler()
     observer = Observer()
     observer.schedule(handler, str(root), recursive=True)
     observer.start()
     
-    print(f"👁️  Watching {root} for changes...")
-    print("   Quick updates will run 2 seconds after you stop editing")
-    print("   Press Ctrl+C to stop\n")
+    print(f"Watching {root} for changes...")
+    print("Press Ctrl+C to stop")
+    print("")
     
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n  Stopping watch mode...")
-        if handler.debounce_timer:
-            handler.debounce_timer.cancel()
+        print("")
+        print("Stopping watch mode...")
+        if handler.timer:
+            handler.timer.cancel()
         observer.stop()
+    
     observer.join()
 
 
-# ──────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────
-
 def main():
-    import argparse
-
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Generate LLM context files for a codebase with smart incremental updates",
+        description="Generate LLM context files for a codebase",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                           # Full generation (or incremental if manifest exists)
-  %(prog)s --quick-update            # Fast incremental update (skip expensive operations)
-  %(prog)s --force                   # Force full regeneration
-  %(prog)s --watch                   # Watch mode (auto-update on file changes)
-  %(prog)s --with-summaries          # Include LLM-generated module summaries
-        """
+  python llm-context-setup.py                    # Full generation
+  python llm-context-setup.py --quick-update     # Fast incremental update
+  python llm-context-setup.py --force            # Force full regeneration
+  python llm-context-setup.py --watch            # Watch mode
+  python llm-context-setup.py --doctor           # Run diagnostics
+  python llm-context-setup.py --with-summaries   # Include LLM module summaries
+        """,
     )
-    parser.add_argument("path", nargs="?", default=".", help="Path to project root (default: current directory)")
-    parser.add_argument("--quick-update", "-q", action="store_true", help="Fast incremental update (skip expensive operations like LLM summaries)")
-    parser.add_argument("--force", "-f", action="store_true", help="Force full regeneration (ignore existing manifest)")
-    parser.add_argument("--watch", "-w", action="store_true", help="Watch for file changes and auto-update")
-    parser.add_argument("--with-summaries", action="store_true", help="Generate LLM-powered module summaries (requires API key)")
-    parser.add_argument("--output", "-o", help="Output directory (default: .llm-context)")
-    parser.add_argument("--config", "-c", help="Path to config file (default: llm-context.yml in project root)")
-    parser.add_argument("--version", "-v", action="version", version=f"%(prog)s {VERSION}")
-
+    
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="Path to project root (default: current directory)",
+    )
+    parser.add_argument(
+        "--quick-update", "-q",
+        action="store_true",
+        help="Fast incremental update",
+    )
+    parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Force full regeneration",
+    )
+    parser.add_argument(
+        "--watch", "-w",
+        action="store_true",
+        help="Watch for file changes and auto-update",
+    )
+    parser.add_argument(
+        "--with-summaries",
+        action="store_true",
+        help="Generate LLM-powered module summaries",
+    )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Run diagnostics",
+    )
+    parser.add_argument(
+        "--security-status",
+        action="store_true",
+        help="Show security configuration",
+    )
+    parser.add_argument(
+        "--output", "-o",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "--config", "-c",
+        help="Path to config file",
+    )
+    parser.add_argument(
+        "--version", "-v",
+        action="version",
+        version=f"llm-context-setup {VERSION}",
+    )
+    
     args = parser.parse_args()
-
     root = Path(args.path).resolve()
+    
+    if args.doctor:
+        tool = DiagnosticTool(root)
+        tool.run()
+        return
     
     if args.config:
         config_path = Path(args.config)
-        if config_path.suffix in ('.yml', '.yaml'):
+        if config_path.suffix in (".yml", ".yaml"):
             try:
                 import yaml
-                with open(config_path) as f:
-                    config = yaml.safe_load(f)
-                _deep_merge(DEFAULT_CONFIG.copy(), config)
+                content = safe_read_text(config_path)
+                if content:
+                    config = get_default_config()
+                    user_config = yaml.safe_load(content)
+                    deep_merge(config, user_config)
+                else:
+                    config = get_default_config()
             except ImportError:
-                print("  ⚠ YAML config requires: pip install pyyaml")
+                print("YAML config requires: pip install pyyaml")
                 sys.exit(1)
         else:
-            with open(config_path) as f:
-                config = json.load(f)
-            _deep_merge(DEFAULT_CONFIG.copy(), config)
+            content = safe_read_text(config_path)
+            if content:
+                config = get_default_config()
+                user_config = json.loads(content)
+                deep_merge(config, user_config)
+            else:
+                config = get_default_config()
     else:
         config = load_config(root)
-
+    
     if args.output:
         config["output_dir"] = args.output
-
+    
     if args.with_summaries:
         config["generate"]["module_summaries"] = True
-
+        if config.get("security", {}).get("mode") == "offline":
+            config["security"]["mode"] = "public-ai"
+    
+    if args.security_status:
+        security = SecurityManager(root, config)
+        security.print_status()
+        return
+    
     if args.watch:
         watch_mode(root, config)
         return
-
-    generator = LLMContextGenerator(root=root, config=config, quick_mode=args.quick_update, force=args.force)
+    
+    generator = LLMContextGenerator(
+        root=root,
+        config=config,
+        quick_mode=args.quick_update,
+        force=args.force,
+    )
     generator.generate()
 
 
