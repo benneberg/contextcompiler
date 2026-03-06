@@ -1,10 +1,15 @@
-# CCC - contextcompiler
-***CodeBase Context Compiler for LLM's***  
+# CCC - Code Context Compiler (LLM-ready)
 
-**Automatically generate LLM-optimized context files for any codebase.**
+**LLM-ready context, instantly.
+Automatically generate LLM-optimized context files and turn your codebase into AI-readable knowledge.**
 
-Stop copying entire repositories into LLM prompts. This tool intelligently extracts and summarizes the essential context an LLM needs to understand and modify your code — types, APIs, architecture, conventions — without flooding the context window.
 
+No more copying entire repositories into LLM prompts. This tool intelligently extracts and summarizes the essential context an LLM needs to understand and modify your code — types, APIs, architecture, conventions — without flooding the context window.
+
+- Stop flooding LLM prompts: Only provide relevant context
+- Persistent project knowledge: LLMs understand conventions, architecture, and core logic
+- Incremental updates & watch mode: Keep context fresh effortlessly
+- Secret redaction & audit logs: Safe for corporate use
 ---
 
 ## What It Does
