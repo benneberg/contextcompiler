@@ -2420,10 +2420,14 @@ class ModuleSummaryGenerator:
         return results
     
 def _call_llm(self, client, filepath: str, source: str) -> Optional[str]:
-    """Call LLM for summary."""
+    """Call LLM for module summary."""
 
     provider = self.config["llm_summaries"]["provider"]
     model = self.config["llm_summaries"]["model"]
+
+    MAX_SOURCE_CHARS = 12000
+    if len(source) > MAX_SOURCE_CHARS:
+        source = source[:MAX_SOURCE_CHARS] + "\n\n# [TRUNCATED]"
 
     prompt = f"""
 Analyze this source module and produce a concise summary.
@@ -2448,9 +2452,7 @@ Be precise and concise.
         response = client.messages.create(
             model=model,
             max_tokens=1200,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text
 
@@ -2458,9 +2460,7 @@ Be precise and concise.
         response = client.chat.completions.create(
             model=model,
             max_tokens=1200,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content
 
