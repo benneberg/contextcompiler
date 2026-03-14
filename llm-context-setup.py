@@ -4972,6 +4972,763 @@ Examples:
     )
     generator.generate()
 
+# ──────────────────────────────────────────────
+# Cross-Repo Conflict Detection (Phase 4)
+# ──────────────────────────────────────────────
+
+@dataclass
+class Conflict:
+    """Represents an inconsistency between services."""
+    conflict_type: str
+    severity: str  # "error", "warning", "info"
+    symbol: str
+    services: List[str]
+    details: str
+    locations: List[str] = field(default_factory=list)
+    suggestion: str = ""
+
+
+@dataclass
+class TypeDefinition:
+    """Represents an extracted type definition."""
+    name: str
+    kind: str  # "enum", "interface", "type", "class", "constant"
+    service: str
+    file: str
+    fields: List[str] = field(default_factory=list)
+    values: List[str] = field(default_factory=list)
+    raw_source: str = ""
+
+
+class ConflictDetector:
+    """Detect inconsistencies across multiple services."""
+    
+    def __init__(self, manifest: WorkspaceManifest):
+        self.manifest = manifest
+        self.type_definitions: Dict[str, List[TypeDefinition]] = {}
+        self.api_contracts: Dict[str, Dict] = {}
+        self.conflicts: List[Conflict] = []
+    
+    def analyze(self, services: List[ServiceConfig] = None) -> List[Conflict]:
+        """
+        Analyze services for conflicts.
+        
+        Returns list of detected conflicts.
+        """
+        if services is None:
+            services = list(self.manifest.services.values())
+        
+        self.conflicts = []
+        self.type_definitions = {}
+        self.api_contracts = {}
+        
+        print(f"\n  Analyzing {len(services)} services for conflicts...")
+        
+        # Step 1: Extract type definitions from all services
+        for service in services:
+            print(f"    Scanning {service.name}...")
+            self._extract_types_from_service(service)
+            self._load_external_deps(service)
+        
+        # Step 2: Detect various conflict types
+        print(f"\n  Checking for conflicts...")
+        
+        self._detect_enum_conflicts()
+        self._detect_interface_conflicts()
+        self._detect_constant_conflicts()
+        self._detect_api_contract_mismatches(services)
+        self._detect_event_mismatches(services)
+        self._detect_naming_inconsistencies()
+        
+        # Sort by severity
+        severity_order = {"error": 0, "warning": 1, "info": 2}
+        self.conflicts.sort(key=lambda c: severity_order.get(c.severity, 99))
+        
+        return self.conflicts
+    
+    def _extract_types_from_service(self, service: ServiceConfig) -> None:
+        """Extract type definitions from a service's source code."""
+        if not service.exists():
+            return
+        
+        # Extract from TypeScript files
+        self._extract_typescript_types(service)
+        
+        # Extract from Python files
+        self._extract_python_types(service)
+    
+    def _extract_typescript_types(self, service: ServiceConfig) -> None:
+        """Extract TypeScript type definitions."""
+        
+        # Patterns for different type definitions
+        enum_pattern = re.compile(
+            r'(?:export\s+)?enum\s+(\w+)\s*\{([^}]+)\}',
+            re.MULTILINE | re.DOTALL
+        )
+        
+        interface_pattern = re.compile(
+            r'(?:export\s+)?interface\s+(\w+)(?:\s+extends\s+[\w,\s]+)?\s*\{([^}]+)\}',
+            re.MULTILINE | re.DOTALL
+        )
+        
+        type_pattern = re.compile(
+            r'(?:export\s+)?type\s+(\w+)\s*=\s*(\{[^}]+\}|[^;]+);',
+            re.MULTILINE
+        )
+        
+        const_pattern = re.compile(
+            r'(?:export\s+)?const\s+([A-Z][A-Z0-9_]+)\s*(?::\s*\w+)?\s*=\s*([^;]+);',
+            re.MULTILINE
+        )
+        
+        for ts_file in service.path.rglob("*.ts"):
+            if should_skip_path(ts_file):
+                continue
+            
+            content = safe_read_text(ts_file)
+            if not content:
+                continue
+            
+            rel_path = str(ts_file.relative_to(service.path))
+            
+            # Extract enums
+            for match in enum_pattern.finditer(content):
+                name = match.group(1)
+                body = match.group(2)
+                
+                # Parse enum values
+                values = []
+                for line in body.split('\n'):
+                    line = line.strip().rstrip(',')
+                    if line and not line.startswith('//'):
+                        # Handle both `VALUE = "value"` and `VALUE`
+                        value_match = re.match(r'(\w+)(?:\s*=\s*["\']?([^"\']+)["\']?)?', line)
+                        if value_match:
+                            values.append(value_match.group(1))
+                
+                type_def = TypeDefinition(
+                    name=name,
+                    kind="enum",
+                    service=service.name,
+                    file=rel_path,
+                    values=values,
+                    raw_source=match.group(0)[:200]
+                )
+                
+                self._add_type_definition(name, type_def)
+            
+            # Extract interfaces
+            for match in interface_pattern.finditer(content):
+                name = match.group(1)
+                body = match.group(2)
+                
+                # Parse fields
+                fields = []
+                for line in body.split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('//'):
+                        # Extract field name
+                        field_match = re.match(r'(\w+)\??:', line)
+                        if field_match:
+                            fields.append(field_match.group(1))
+                
+                type_def = TypeDefinition(
+                    name=name,
+                    kind="interface",
+                    service=service.name,
+                    file=rel_path,
+                    fields=sorted(fields),
+                    raw_source=match.group(0)[:300]
+                )
+                
+                self._add_type_definition(name, type_def)
+            
+            # Extract type aliases
+            for match in type_pattern.finditer(content):
+                name = match.group(1)
+                body = match.group(2)
+                
+                # Skip simple aliases
+                if '{' in body:
+                    fields = []
+                    for field_match in re.finditer(r'(\w+)\??:', body):
+                        fields.append(field_match.group(1))
+                    
+                    type_def = TypeDefinition(
+                        name=name,
+                        kind="type",
+                        service=service.name,
+                        file=rel_path,
+                        fields=sorted(fields),
+                        raw_source=match.group(0)[:200]
+                    )
+                    
+                    self._add_type_definition(name, type_def)
+            
+            # Extract constants
+            for match in const_pattern.finditer(content):
+                name = match.group(1)
+                value = match.group(2).strip().strip('"').strip("'")
+                
+                type_def = TypeDefinition(
+                    name=name,
+                    kind="constant",
+                    service=service.name,
+                    file=rel_path,
+                    values=[value],
+                    raw_source=f"const {name} = {value}"
+                )
+                
+                self._add_type_definition(name, type_def)
+    
+    def _extract_python_types(self, service: ServiceConfig) -> None:
+        """Extract Python type definitions."""
+        
+        for py_file in service.path.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
+            rel_path = str(py_file.relative_to(service.path))
+            
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    # Check if it's an Enum
+                    base_names = []
+                    for base in node.bases:
+                        if isinstance(base, ast.Name):
+                            base_names.append(base.id)
+                        elif isinstance(base, ast.Attribute):
+                            base_names.append(base.attr)
+                    
+                    if 'Enum' in base_names or 'IntEnum' in base_names or 'StrEnum' in base_names:
+                        # Extract enum values
+                        values = []
+                        for item in node.body:
+                            if isinstance(item, ast.Assign):
+                                for target in item.targets:
+                                    if isinstance(target, ast.Name):
+                                        values.append(target.id)
+                        
+                        type_def = TypeDefinition(
+                            name=node.name,
+                            kind="enum",
+                            service=service.name,
+                            file=rel_path,
+                            values=values
+                        )
+                        self._add_type_definition(node.name, type_def)
+                    
+                    elif 'BaseModel' in base_names or 'TypedDict' in base_names:
+                        # Extract fields from Pydantic model or TypedDict
+                        fields = []
+                        for item in node.body:
+                            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                                fields.append(item.target.id)
+                        
+                        type_def = TypeDefinition(
+                            name=node.name,
+                            kind="interface",
+                            service=service.name,
+                            file=rel_path,
+                            fields=sorted(fields)
+                        )
+                        self._add_type_definition(node.name, type_def)
+                
+                # Extract module-level constants
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id.isupper():
+                            # It's a constant (all uppercase)
+                            try:
+                                value = ast.literal_eval(node.value)
+                                if isinstance(value, (str, int, float, bool)):
+                                    type_def = TypeDefinition(
+                                        name=target.id,
+                                        kind="constant",
+                                        service=service.name,
+                                        file=rel_path,
+                                        values=[str(value)]
+                                    )
+                                    self._add_type_definition(target.id, type_def)
+                            except (ValueError, TypeError):
+                                pass
+    
+    def _add_type_definition(self, name: str, type_def: TypeDefinition) -> None:
+        """Add a type definition to the registry."""
+        if name not in self.type_definitions:
+            self.type_definitions[name] = []
+        self.type_definitions[name].append(type_def)
+    
+    def _load_external_deps(self, service: ServiceConfig) -> None:
+        """Load external dependencies from generated context."""
+        ext_deps_file = service.path / ".llm-context" / "external-dependencies.json"
+        
+        if ext_deps_file.exists():
+            content = safe_read_text(ext_deps_file)
+            if content:
+                try:
+                    self.api_contracts[service.name] = json.loads(content)
+                except json.JSONDecodeError:
+                    pass
+    
+    def _detect_enum_conflicts(self) -> None:
+        """Detect enum definitions with mismatched values."""
+        for name, definitions in self.type_definitions.items():
+            enums = [d for d in definitions if d.kind == "enum"]
+            
+            if len(enums) < 2:
+                continue
+            
+            # Check if all enums have the same values
+            value_sets = [frozenset(e.values) for e in enums]
+            unique_value_sets = set(value_sets)
+            
+            if len(unique_value_sets) > 1:
+                # Conflict found!
+                services = [e.service for e in enums]
+                locations = [f"{e.service}:{e.file}" for e in enums]
+                
+                # Build detailed message
+                details_parts = []
+                for enum in enums:
+                    values_str = ", ".join(enum.values[:5])
+                    if len(enum.values) > 5:
+                        values_str += f" +{len(enum.values) - 5} more"
+                    details_parts.append(f"{enum.service}: [{values_str}]")
+                
+                details = "\n      ".join(details_parts)
+                
+                # Find missing values
+                all_values = set()
+                for e in enums:
+                    all_values.update(e.values)
+                
+                suggestions = []
+                for enum in enums:
+                    missing = all_values - set(enum.values)
+                    if missing:
+                        suggestions.append(f"Add {missing} to {enum.service}")
+                
+                conflict = Conflict(
+                    conflict_type="enum_mismatch",
+                    severity="error",
+                    symbol=name,
+                    services=services,
+                    details=f"Enum '{name}' has different values:\n      {details}",
+                    locations=locations,
+                    suggestion="; ".join(suggestions) if suggestions else "Synchronize enum values across services"
+                )
+                self.conflicts.append(conflict)
+    
+    def _detect_interface_conflicts(self) -> None:
+        """Detect interface/type definitions with mismatched fields."""
+        for name, definitions in self.type_definitions.items():
+            interfaces = [d for d in definitions if d.kind in ["interface", "type"]]
+            
+            if len(interfaces) < 2:
+                continue
+            
+            # Skip common generic names
+            if name in ["Props", "State", "Config", "Options", "Context", "Request", "Response"]:
+                continue
+            
+            # Check if all interfaces have the same fields
+            field_sets = [frozenset(i.fields) for i in interfaces]
+            unique_field_sets = set(field_sets)
+            
+            if len(unique_field_sets) > 1:
+                services = [i.service for i in interfaces]
+                locations = [f"{i.service}:{i.file}" for i in interfaces]
+                
+                # Build detailed message
+                details_parts = []
+                for interface in interfaces:
+                    fields_str = ", ".join(interface.fields[:5])
+                    if len(interface.fields) > 5:
+                        fields_str += f" +{len(interface.fields) - 5} more"
+                    details_parts.append(f"{interface.service}: [{fields_str}]")
+                
+                details = "\n      ".join(details_parts)
+                
+                # Find field differences
+                all_fields = set()
+                for i in interfaces:
+                    all_fields.update(i.fields)
+                
+                common_fields = set.intersection(*[set(i.fields) for i in interfaces])
+                different_fields = all_fields - common_fields
+                
+                conflict = Conflict(
+                    conflict_type="interface_mismatch",
+                    severity="warning",
+                    symbol=name,
+                    services=services,
+                    details=f"Type '{name}' has different fields:\n      {details}",
+                    locations=locations,
+                    suggestion=f"Inconsistent fields: {different_fields}. Consider creating a shared types package."
+                )
+                self.conflicts.append(conflict)
+    
+    def _detect_constant_conflicts(self) -> None:
+        """Detect constants with mismatched values."""
+        for name, definitions in self.type_definitions.items():
+            constants = [d for d in definitions if d.kind == "constant"]
+            
+            if len(constants) < 2:
+                continue
+            
+            # Check if all constants have the same value
+            values = [c.values[0] if c.values else "" for c in constants]
+            unique_values = set(values)
+            
+            if len(unique_values) > 1:
+                services = [c.service for c in constants]
+                locations = [f"{c.service}:{c.file}" for c in constants]
+                
+                details_parts = [f"{c.service}: {c.values[0] if c.values else 'undefined'}" for c in constants]
+                details = "\n      ".join(details_parts)
+                
+                conflict = Conflict(
+                    conflict_type="constant_mismatch",
+                    severity="warning",
+                    symbol=name,
+                    services=services,
+                    details=f"Constant '{name}' has different values:\n      {details}",
+                    locations=locations,
+                    suggestion="Centralize this constant in a shared configuration or types package"
+                )
+                self.conflicts.append(conflict)
+    
+    def _detect_api_contract_mismatches(self, services: List[ServiceConfig]) -> None:
+        """Detect API contract mismatches between services."""
+        # Build map of exposed APIs
+        exposed_apis: Dict[str, List[Tuple[str, str]]] = {}  # route -> [(service, method)]
+        
+        # Build map of consumed APIs
+        consumed_apis: Dict[str, List[Tuple[str, str]]] = {}  # service -> [apis]
+        
+        for service in services:
+            if service.name not in self.api_contracts:
+                continue
+            
+            contract = self.api_contracts[service.name]
+            
+            # Collect exposed APIs
+            for api in contract.get("exposes", {}).get("api", []):
+                # Normalize route
+                parts = api.split(" ", 1)
+                if len(parts) == 2:
+                    method, route = parts
+                else:
+                    method, route = "GET", parts[0]
+                
+                # Normalize route (remove path params formatting differences)
+                normalized = self._normalize_route(route)
+                
+                if normalized not in exposed_apis:
+                    exposed_apis[normalized] = []
+                exposed_apis[normalized].append((service.name, method))
+            
+            # Collect consumed APIs
+            consumed_apis[service.name] = []
+            for api in contract.get("depends_on", {}).get("apis_consumed", []):
+                consumed_apis[service.name].append(api)
+        
+        # Check for mismatches
+        for consumer, apis in consumed_apis.items():
+            for api in apis:
+                # Parse consumed API
+                parts = api.split(" ", 1)
+                if len(parts) == 2:
+                    method, url = parts
+                else:
+                    continue
+                
+                # Extract route from URL
+                route_match = re.search(r'https?://[^/]+(/[^\s?#]*)', url)
+                if not route_match:
+                    continue
+                
+                route = route_match.group(1)
+                normalized = self._normalize_route(route)
+                
+                # Check if any service exposes this
+                if normalized not in exposed_apis:
+                    # Check for similar routes
+                    similar = self._find_similar_routes(normalized, exposed_apis.keys())
+                    
+                    if similar:
+                        conflict = Conflict(
+                            conflict_type="api_route_mismatch",
+                            severity="warning",
+                            symbol=route,
+                            services=[consumer],
+                            details=f"Service '{consumer}' calls '{api}' but route not found.\n      Similar routes: {similar}",
+                            suggestion=f"Check if the route should be '{similar[0]}' instead"
+                        )
+                        self.conflicts.append(conflict)
+    
+    def _detect_event_mismatches(self, services: List[ServiceConfig]) -> None:
+        """Detect event naming mismatches."""
+        # Collect all events
+        published_events: Dict[str, str] = {}  # event -> service
+        subscribed_events: Dict[str, str] = {}  # event -> service
+        
+        for service in services:
+            if service.name not in self.api_contracts:
+                continue
+            
+            contract = self.api_contracts[service.name]
+            
+            # Published events
+            for event in contract.get("exposes", {}).get("events", []):
+                published_events[event] = service.name
+            
+            # Subscribed events (from external dependencies)
+            # This would need more sophisticated detection
+        
+        # Check for naming convention mismatches
+        event_patterns = {}
+        for event in published_events.keys():
+            # Detect pattern: dot.notation vs camelCase vs snake_case
+            if '.' in event:
+                pattern = "dot.notation"
+            elif '_' in event:
+                pattern = "snake_case"
+            elif event[0].islower() and any(c.isupper() for c in event):
+                pattern = "camelCase"
+            else:
+                pattern = "other"
+            
+            if pattern not in event_patterns:
+                event_patterns[pattern] = []
+            event_patterns[pattern].append((event, published_events[event]))
+        
+        # If multiple patterns detected, warn
+        if len(event_patterns) > 1:
+            details_parts = []
+            for pattern, events in event_patterns.items():
+                event_names = [e[0] for e in events[:3]]
+                details_parts.append(f"{pattern}: {event_names}")
+            
+            details = "\n      ".join(details_parts)
+            
+            conflict = Conflict(
+                conflict_type="event_naming_inconsistency",
+                severity="info",
+                symbol="event_naming",
+                services=list(published_events.values()),
+                details=f"Inconsistent event naming conventions:\n      {details}",
+                suggestion="Consider standardizing on one event naming convention (e.g., dot.notation like 'user.created')"
+            )
+            self.conflicts.append(conflict)
+    
+    def _detect_naming_inconsistencies(self) -> None:
+        """Detect similar names that might be the same thing."""
+        # Group by lowercase name
+        name_groups: Dict[str, List[TypeDefinition]] = {}
+        
+        for name, definitions in self.type_definitions.items():
+            lower_name = name.lower()
+            if lower_name not in name_groups:
+                name_groups[lower_name] = []
+            name_groups[lower_name].extend(definitions)
+        
+        # Find groups with different casing
+        for lower_name, definitions in name_groups.items():
+            unique_names = set(d.name for d in definitions)
+            
+            if len(unique_names) > 1:
+                services = list(set(d.service for d in definitions))
+                
+                conflict = Conflict(
+                    conflict_type="naming_inconsistency",
+                    severity="info",
+                    symbol=lower_name,
+                    services=services,
+                    details=f"Inconsistent casing for '{lower_name}': {unique_names}",
+                    suggestion="Standardize naming across services"
+                )
+                self.conflicts.append(conflict)
+    
+    def _normalize_route(self, route: str) -> str:
+        """Normalize a route for comparison."""
+        # Remove trailing slashes
+        route = route.rstrip('/')
+        
+        # Normalize path parameters
+        # Convert {param}, :param, [param] all to {param}
+        route = re.sub(r':(\w+)', r'{\1}', route)
+        route = re.sub(r'\[(\w+)\]', r'{\1}', route)
+        
+        return route.lower()
+    
+    def _find_similar_routes(self, route: str, existing_routes: List[str]) -> List[str]:
+        """Find routes similar to the given route."""
+        similar = []
+        
+        route_parts = route.split('/')
+        
+        for existing in existing_routes:
+            existing_parts = existing.split('/')
+            
+            # Same number of segments
+            if len(route_parts) != len(existing_parts):
+                continue
+            
+            # Count matching segments
+            matches = 0
+            for a, b in zip(route_parts, existing_parts):
+                if a == b or '{' in a or '{' in b:
+                    matches += 1
+            
+            # If most segments match, consider it similar
+            if matches >= len(route_parts) - 1:
+                similar.append(existing)
+        
+        return similar
+    
+    def generate_report(self, output_dir: Path = None) -> str:
+        """Generate a conflicts report."""
+        lines = [
+            "# Cross-Repository Conflict Report",
+            "",
+            f"Generated: {get_timestamp()}",
+            f"Services analyzed: {len(self.manifest.services)}",
+            f"Conflicts found: {len(self.conflicts)}",
+            "",
+        ]
+        
+        if not self.conflicts:
+            lines.extend([
+                "## ✅ No Conflicts Detected",
+                "",
+                "All analyzed services appear to be consistent.",
+            ])
+        else:
+            # Group by severity
+            errors = [c for c in self.conflicts if c.severity == "error"]
+            warnings = [c for c in self.conflicts if c.severity == "warning"]
+            infos = [c for c in self.conflicts if c.severity == "info"]
+            
+            lines.extend([
+                "## Summary",
+                "",
+                f"- 🔴 Errors: {len(errors)}",
+                f"- 🟡 Warnings: {len(warnings)}",
+                f"- 🔵 Info: {len(infos)}",
+                "",
+            ])
+            
+            if errors:
+                lines.extend([
+                    "## 🔴 Errors",
+                    "",
+                    "These conflicts should be fixed before deploying:",
+                    "",
+                ])
+                for conflict in errors:
+                    lines.extend(self._format_conflict(conflict))
+            
+            if warnings:
+                lines.extend([
+                    "## 🟡 Warnings",
+                    "",
+                    "These inconsistencies may cause issues:",
+                    "",
+                ])
+                for conflict in warnings:
+                    lines.extend(self._format_conflict(conflict))
+            
+            if infos:
+                lines.extend([
+                    "## 🔵 Info",
+                    "",
+                    "Potential improvements:",
+                    "",
+                ])
+                for conflict in infos:
+                    lines.extend(self._format_conflict(conflict))
+        
+        content = "\n".join(lines)
+        
+        if output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            safe_write_text(output_dir / "conflicts-report.md", content)
+        
+        return content
+    
+    def _format_conflict(self, conflict: Conflict) -> List[str]:
+        """Format a single conflict for the report."""
+        lines = [
+            f"### {conflict.conflict_type}: `{conflict.symbol}`",
+            "",
+            f"**Services:** {', '.join(conflict.services)}",
+            "",
+            f"**Details:**",
+            f"```",
+            conflict.details,
+            f"```",
+            "",
+        ]
+        
+        if conflict.locations:
+            lines.append(f"**Locations:** {', '.join(conflict.locations)}")
+            lines.append("")
+        
+        if conflict.suggestion:
+            lines.append(f"**Suggestion:** {conflict.suggestion}")
+            lines.append("")
+        
+        lines.append("---")
+        lines.append("")
+        
+        return lines
+    
+    def print_summary(self) -> None:
+        """Print a summary of detected conflicts."""
+        print(f"\n{'='*60}")
+        print(f"  Conflict Detection Results")
+        print(f"{'='*60}")
+        
+        if not self.conflicts:
+            print(f"\n  ✅ No conflicts detected!")
+            print(f"\n  All {len(self.manifest.services)} services appear to be consistent.")
+        else:
+            errors = [c for c in self.conflicts if c.severity == "error"]
+            warnings = [c for c in self.conflicts if c.severity == "warning"]
+            infos = [c for c in self.conflicts if c.severity == "info"]
+            
+            print(f"\n  Found {len(self.conflicts)} issue(s):")
+            print(f"    🔴 Errors: {len(errors)}")
+            print(f"    🟡 Warnings: {len(warnings)}")
+            print(f"    🔵 Info: {len(infos)}")
+            
+            if errors:
+                print(f"\n  Errors (fix these first):")
+                for conflict in errors[:5]:
+                    print(f"    • {conflict.conflict_type}: {conflict.symbol}")
+                    print(f"      Services: {', '.join(conflict.services)}")
+                if len(errors) > 5:
+                    print(f"    ... and {len(errors) - 5} more")
+            
+            if warnings:
+                print(f"\n  Warnings:")
+                for conflict in warnings[:5]:
+                    print(f"    • {conflict.conflict_type}: {conflict.symbol}")
+                if len(warnings) > 5:
+                    print(f"    ... and {len(warnings) - 5} more")
+        
+        print(f"\n{'='*60}\n")
 
 if __name__ == "__main__":
     main()
