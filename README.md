@@ -91,7 +91,7 @@ PKML gives repositories a standard way to expose that knowledge in a format that
 
 A PKML-enabled repository typically contains:
 
-- `CLAUDE.md` — project-specific conventions and guidance
+- `LLM.md` — project-specific conventions and guidance
 - `ARCHITECTURE.md` — system-level understanding
 - `.llm-context/tree.txt` — file structure
 - `.llm-context/routes.txt` — API routes
@@ -208,7 +208,7 @@ CCC also supports:
 Download and run:
 
 ```bash
-curl -O https://raw.githubusercontent.com/yourusername/ccc/main/llm-context-setup.py
+curl -O https://raw.githubusercontent.com/benneberg/ccc/main/llm-context-setup.py
 python3 llm-context-setup.py --doctor
 ```
 
@@ -327,7 +327,7 @@ your-project/
 │   ├── external-dependencies.json
 │   ├── manifest.json
 │   └── audit.log
-├── CLAUDE.md
+├── LLM.md
 ├── ARCHITECTURE.md
 └── llm-context.yml
 ```
