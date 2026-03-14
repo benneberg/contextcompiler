@@ -24,6 +24,10 @@ from .generators.schemas import SchemaGenerator
 from .generators.api import APIGenerator
 from .generators.dependencies import DependencyGenerator
 from .generators.symbols import SymbolIndexGenerator
+from .generators.entrypoints import EntryPointGenerator
+from .generators.database import DatabaseSchemaGenerator
+from .generators.contracts import ContractsGenerator
+from .generators.external import ExternalDependencyGenerator
 from .utils.files import safe_read_text, safe_write_text, EXCLUDE_DIRS
 from .utils.formatting import get_timestamp, human_readable_size
 
@@ -33,7 +37,7 @@ except ImportError:
     VERSION = "0.1.0"
 
 
-# ── Framework detection helpers ───────────────────────────────────────────────
+# ── Framework detection ───────────────────────────────────────────────────────
 
 FRAMEWORK_INDICATORS: Dict[str, List[str]] = {
     "fastapi":    ["fastapi", "from fastapi"],
@@ -58,7 +62,7 @@ DEP_FILES = [
 
 
 def _file_contains_any(path: Path, indicators: List[str]) -> bool:
-    """Stream a file line-by-line and return True on first indicator match."""
+    """Stream a file line-by-line; return True on first indicator match."""
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -71,13 +75,10 @@ def _file_contains_any(path: Path, indicators: List[str]) -> bool:
     return False
 
 
-class ProjectDetector:
-    """
-    Detect project type, languages, and framework.
+# ── Project detection ─────────────────────────────────────────────────────────
 
-    Uses FileIndex for language detection (no extra scan).
-    Uses streaming line-by-line reads for framework detection.
-    """
+class ProjectDetector:
+    """Detect project type, languages, and framework using the FileIndex."""
 
     def __init__(self, root: Path, file_index: FileIndex):
         self.root = root
@@ -89,9 +90,18 @@ class ProjectDetector:
         info.languages = self.index.detect_languages()
         self._detect_from_configs(info)
         info.framework = self._detect_framework()
-        info.has_docker = self._has_docker()
-        info.has_ci = self._has_ci()
-        info.has_tests = self._has_tests()
+        info.has_docker = any(
+            (self.root / f).exists()
+            for f in ["Dockerfile", "docker-compose.yml", "docker-compose.yaml"]
+        )
+        info.has_ci = (
+            (self.root / ".github" / "workflows").exists()
+            or (self.root / ".gitlab-ci.yml").exists()
+            or (self.root / "Jenkinsfile").exists()
+        )
+        info.has_tests = any(
+            (self.root / d).exists() for d in ["tests", "test", "__tests__", "spec"]
+        )
         return info
 
     def _detect_from_configs(self, info: ProjectInfo) -> None:
@@ -102,9 +112,6 @@ class ProjectDetector:
             m = re.search(r'description\s*=\s*"([^"]*)"', content)
             if m:
                 info.description = m.group(1)
-            m = re.search(r'python\s*=\s*"([^"]*)"', content)
-            if m:
-                info.python_version = m.group(1)
 
         package_json = self.root / "package.json"
         if package_json.exists():
@@ -125,33 +132,19 @@ class ProjectDetector:
             info.package_manager = "go modules"
 
     def _detect_framework(self) -> str:
-        """
-        Streaming framework detection.
-
-        Checks dependency manifests first (cheap), then scans source files
-        line-by-line stopping as soon as an indicator is found.
-        """
         detected = []
-
-        # 1. Cheap pass: dependency files only
         dep_candidates = [self.root / f for f in DEP_FILES if (self.root / f).exists()]
+
         for framework, indicators in FRAMEWORK_INDICATORS.items():
             for dep_file in dep_candidates:
                 if _file_contains_any(dep_file, indicators):
                     detected.append(framework)
                     break
 
-        # 2. Source file pass for anything not found in deps (limit to 60 files)
-        already_found = set(detected)
-        remaining = {
-            fw: ind for fw, ind in FRAMEWORK_INDICATORS.items()
-            if fw not in already_found
-        }
+        already = set(detected)
+        remaining = {fw: ind for fw, ind in FRAMEWORK_INDICATORS.items() if fw not in already}
         if remaining:
-            # Prioritise smaller files for speed
-            candidates = sorted(
-                self.index.all_files(), key=lambda f: f.size
-            )[:60]
+            candidates = sorted(self.index.all_files(), key=lambda f: f.size)[:60]
             for framework, indicators in remaining.items():
                 for fi in candidates:
                     if _file_contains_any(fi.path, indicators):
@@ -160,26 +153,6 @@ class ProjectDetector:
 
         return ", ".join(detected) if detected else "unknown"
 
-    def _has_docker(self) -> bool:
-        return any(
-            (self.root / f).exists()
-            for f in ["Dockerfile", "docker-compose.yml", "docker-compose.yaml"]
-        )
-
-    def _has_ci(self) -> bool:
-        return (
-            (self.root / ".github" / "workflows").exists()
-            or (self.root / ".gitlab-ci.yml").exists()
-            or (self.root / "Jenkinsfile").exists()
-            or (self.root / ".circleci").exists()
-        )
-
-    def _has_tests(self) -> bool:
-        return any(
-            (self.root / d).exists()
-            for d in ["tests", "test", "__tests__", "spec"]
-        )
-
 
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
@@ -187,11 +160,11 @@ class LLMContextGenerator:
     """
     Main orchestrator for single-repository context generation.
 
-    Performance characteristics:
-    - Single filesystem scan via FileIndex
-    - Mtime-gated hash cache via HashCache
-    - Independent generators run in parallel via ThreadPoolExecutor
-    - Framework detection streams files line-by-line
+    - Single filesystem scan (FileIndex)
+    - Mtime-gated hash cache (HashCache)
+    - Independent generators run in parallel (ThreadPoolExecutor)
+    - Streaming framework detection
+    - No bridge to standalone script — all generators are in the package
     """
 
     def __init__(
@@ -227,7 +200,7 @@ class LLMContextGenerator:
         print("=" * 60)
         print("")
 
-        # ── Step 1: Single filesystem scan ────────────────────────────────────
+        # Step 1: single filesystem scan
         print("-> Building file index...")
         file_index = FileIndex(self.root, EXCLUDE_DIRS).build()
         stats = file_index.stats()
@@ -235,7 +208,7 @@ class LLMContextGenerator:
 
         hash_cache = HashCache(self.root)
 
-        # ── Step 2: Project detection (uses index, no extra scan) ─────────────
+        # Step 2: project detection
         print("-> Detecting project type...")
         detector = ProjectDetector(self.root, file_index)
         project = detector.detect()
@@ -248,35 +221,35 @@ class LLMContextGenerator:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        gen_config = dict(self.config["generate"])
+        gc = dict(self.config["generate"])
         if self.quick_mode:
-            gen_config["module_summaries"] = False
-            gen_config["db_schema"] = False
+            gc["module_summaries"] = False
+            gc["db_schema"] = False
 
-        # ── Step 3: Parallel generation ───────────────────────────────────────
-        # Tasks that are independent of each other run concurrently.
-        # Sequential tasks (env, deps copy, git, scaffolds) run after.
-        parallel_tasks = []
-        if gen_config.get("tree"):
-            parallel_tasks.append(("tree", self._generate_tree, (file_index,)))
-        if gen_config.get("schemas"):
-            parallel_tasks.append(("schemas", self._generate_schemas, (project, file_index)))
-        if gen_config.get("routes"):
-            parallel_tasks.append(("routes", self._generate_routes, (project, file_index)))
-        if gen_config.get("public_api"):
-            parallel_tasks.append(("public_api", self._generate_public_api, (project, file_index)))
-        if gen_config.get("dependencies"):
-            parallel_tasks.append(("deps", self._generate_dependencies, (project, file_index, gen_config)))
-        if gen_config.get("symbol_index", True):
-            parallel_tasks.append(("symbols", self._generate_symbols, (project, file_index)))
+        # Step 3: parallel generation
+        parallel = []
+        if gc.get("tree"):
+            parallel.append(("tree",       self._gen_tree,        (file_index,)))
+        if gc.get("schemas"):
+            parallel.append(("schemas",    self._gen_schemas,     (project, file_index)))
+        if gc.get("routes"):
+            parallel.append(("routes",     self._gen_routes,      (project, file_index)))
+        if gc.get("public_api"):
+            parallel.append(("public_api", self._gen_public_api,  (project, file_index)))
+        if gc.get("dependencies"):
+            parallel.append(("deps",       self._gen_dependencies,(project, file_index, gc)))
+        if gc.get("symbol_index", True):
+            parallel.append(("symbols",    self._gen_symbols,     (project, file_index)))
+        if gc.get("entry_points"):
+            parallel.append(("entries",    self._gen_entrypoints, (file_index,)))
+        if gc.get("db_schema"):
+            parallel.append(("db_schema",  self._gen_db_schema,   (file_index,)))
+        if gc.get("api_contract"):
+            parallel.append(("contract",   self._gen_api_contract,()))
 
-        print(f"-> Running {len(parallel_tasks)} generators in parallel...")
-        max_workers = min(len(parallel_tasks), 6)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(fn, *args): name
-                for name, fn, args in parallel_tasks
-            }
+        print(f"-> Running {len(parallel)} generators in parallel...")
+        with ThreadPoolExecutor(max_workers=min(len(parallel), 6)) as pool:
+            futures = {pool.submit(fn, *args): name for name, fn, args in parallel}
             for future in as_completed(futures):
                 name = futures[future]
                 try:
@@ -284,27 +257,29 @@ class LLMContextGenerator:
                 except Exception as exc:
                     print(f"   Warning: {name} failed — {exc}")
 
-        # ── Step 4: Sequential tasks ──────────────────────────────────────────
-        if gen_config.get("env_shape"):
-            self._generate_env_shape()
-        self._copy_dependency_files()
-        if gen_config.get("recent_activity"):
-            self._generate_recent_activity()
-        if gen_config.get("external_dependencies", True):
-            self._generate_external_dependencies(project)
-        if gen_config.get("claude_md_scaffold"):
-            self._generate_llm_md(project)
-        if gen_config.get("architecture_md_scaffold"):
-            self._generate_architecture_md(project)
+        # Step 4: sequential tasks
+        if gc.get("env_shape"):
+            self._gen_env_shape()
+        self._copy_dep_files()
+        if gc.get("recent_activity"):
+            self._gen_recent_activity()
+        if gc.get("external_dependencies", True):
+            self._gen_external_deps(project, file_index)
+        if gc.get("module_summaries") and not self.quick_mode:
+            self._gen_summaries(project, file_index)
+        if gc.get("claude_md_scaffold"):
+            self._gen_llm_md(project)
+        if gc.get("architecture_md_scaffold"):
+            self._gen_architecture_md(project)
 
-        # ── Step 5: Persist ───────────────────────────────────────────────────
+        # Step 5: persist
         hash_cache.save()
         self.updater.new_manifest.save(self.root)
         self.security.log_audit("generate", {"mode": mode})
 
         print("")
         print("=" * 60)
-        print(f"  Done. Context in: {self.output_dir}")
+        print(f"  Done. Context written to: {self.output_dir}")
         self.updater.print_summary()
 
     # ── Write helper ──────────────────────────────────────────────────────────
@@ -316,143 +291,156 @@ class LLMContextGenerator:
             path = self.output_dir / filename
         safe_write_text(path, content)
 
-    # ── Parallel generator methods ────────────────────────────────────────────
+    # ── Parallel generators ───────────────────────────────────────────────────
 
-    def _generate_tree(self, file_index: FileIndex) -> None:
-        should_regen, reason = self.updater.should_regenerate("tree.txt")
-        if should_regen:
-            print(f"   tree.txt — generating ({reason})")
-            gen = TreeGenerator(self.root, self.config, file_index)
-            content, sources = gen.generate()
+    def _gen_tree(self, file_index: FileIndex) -> None:
+        should, reason = self.updater.should_regenerate("tree.txt")
+        if should:
+            print(f"   tree.txt ({reason})")
+            content, sources = TreeGenerator(self.root, self.config, file_index).generate()
             self._write("tree.txt", content)
             self.updater.mark_generated("tree.txt", content, sources)
         else:
-            print(f"   tree.txt — {reason}")
             self.updater.mark_skipped("tree.txt")
 
-    def _generate_schemas(self, project: ProjectInfo, file_index: FileIndex) -> None:
+    def _gen_schemas(self, project: ProjectInfo, file_index: FileIndex) -> None:
         gen = SchemaGenerator(self.root, self.config, file_index)
-        all_schemas = gen.generate_all()
-        for filename, (content, sources) in all_schemas.items():
+        for filename, (content, sources) in gen.generate_all().items():
             if not content.strip():
                 continue
-            should_regen, reason = self.updater.should_regenerate(filename, sources)
-            if should_regen:
-                print(f"   {filename} — generating ({reason})")
+            should, reason = self.updater.should_regenerate(filename, sources)
+            if should:
+                print(f"   {filename} ({reason})")
                 self._write(filename, content)
                 self.updater.mark_generated(filename, content, sources)
             else:
-                print(f"   {filename} — {reason}")
                 self.updater.mark_skipped(filename)
 
-    def _generate_routes(self, project: ProjectInfo, file_index: FileIndex) -> None:
-        gen = APIGenerator(self.root, self.config, file_index, project.framework)
-        content, sources = gen.generate_routes()
+    def _gen_routes(self, project: ProjectInfo, file_index: FileIndex) -> None:
+        content, sources = APIGenerator(
+            self.root, self.config, file_index, project.framework
+        ).generate_routes()
         if content:
-            should_regen, reason = self.updater.should_regenerate("routes.txt", sources)
-            if should_regen:
-                print(f"   routes.txt — generating ({reason})")
+            should, reason = self.updater.should_regenerate("routes.txt", sources)
+            if should:
+                print(f"   routes.txt ({reason})")
                 self._write("routes.txt", content)
                 self.updater.mark_generated("routes.txt", content, sources)
             else:
-                print(f"   routes.txt — {reason}")
                 self.updater.mark_skipped("routes.txt")
 
-    def _generate_public_api(self, project: ProjectInfo, file_index: FileIndex) -> None:
-        gen = APIGenerator(self.root, self.config, file_index, project.framework)
-        content, sources = gen.generate_public_api()
+    def _gen_public_api(self, project: ProjectInfo, file_index: FileIndex) -> None:
+        content, sources = APIGenerator(
+            self.root, self.config, file_index, project.framework
+        ).generate_public_api()
         if content:
-            should_regen, reason = self.updater.should_regenerate("public-api.txt", sources)
-            if should_regen:
-                print(f"   public-api.txt — generating ({reason})")
+            should, reason = self.updater.should_regenerate("public-api.txt", sources)
+            if should:
+                print(f"   public-api.txt ({reason})")
                 self._write("public-api.txt", content)
                 self.updater.mark_generated("public-api.txt", content, sources)
             else:
-                print(f"   public-api.txt — {reason}")
                 self.updater.mark_skipped("public-api.txt")
 
-    def _generate_dependencies(
-        self, project: ProjectInfo, file_index: FileIndex, gen_config: dict
+    def _gen_dependencies(
+        self, project: ProjectInfo, file_index: FileIndex, gc: dict
     ) -> None:
         gen = DependencyGenerator(self.root, self.config, file_index)
         content, sources = gen.generate()
         if content:
-            should_regen, reason = self.updater.should_regenerate(
-                "dependency-graph.txt", sources
-            )
-            if should_regen:
-                print(f"   dependency-graph.txt — generating ({reason})")
+            should, reason = self.updater.should_regenerate("dependency-graph.txt", sources)
+            if should:
+                print(f"   dependency-graph.txt ({reason})")
                 self._write("dependency-graph.txt", content)
                 self.updater.mark_generated("dependency-graph.txt", content, sources)
-                if gen_config.get("dependency_graph_mermaid"):
+                if gc.get("dependency_graph_mermaid"):
                     mermaid = gen.generate_mermaid(content)
                     self._write("dependency-graph.md", mermaid)
                     self.updater.mark_generated("dependency-graph.md", mermaid, sources)
             else:
-                print(f"   dependency-graph.txt — {reason}")
                 self.updater.mark_skipped("dependency-graph.txt")
-                if gen_config.get("dependency_graph_mermaid"):
+                if gc.get("dependency_graph_mermaid"):
                     self.updater.mark_skipped("dependency-graph.md")
 
-    def _generate_symbols(self, project: ProjectInfo, file_index: FileIndex) -> None:
+    def _gen_symbols(self, project: ProjectInfo, file_index: FileIndex) -> None:
         gen = SymbolIndexGenerator(self.root, self.config, file_index)
-        sources = (
-            file_index.by_extension(".py")
-            + file_index.by_extension(".ts", ".tsx")
-        )
-        source_paths = [fi.path for fi in sources]
-        should_regen, reason = self.updater.should_regenerate(
-            "symbol-index.json", source_paths
-        )
-        if should_regen:
-            print(f"   symbol-index.json — generating ({reason})")
-            content, src_files = gen.generate()
+        src_paths = [fi.path for fi in file_index.by_extension(".py", ".ts", ".tsx")]
+        should, reason = self.updater.should_regenerate("symbol-index.json", src_paths)
+        if should:
+            print(f"   symbol-index.json ({reason})")
+            content, sources = gen.generate()
             self._write("symbol-index.json", content)
-            self.updater.mark_generated("symbol-index.json", content, src_files)
+            self.updater.mark_generated("symbol-index.json", content, sources)
         else:
-            print(f"   symbol-index.json — {reason}")
             self.updater.mark_skipped("symbol-index.json")
+
+    def _gen_entrypoints(self, file_index: FileIndex) -> None:
+        gen = EntryPointGenerator(self.root, self.config, file_index)
+        should, reason = self.updater.should_regenerate("entry-points.json")
+        if should:
+            print(f"   entry-points.json ({reason})")
+            content, sources = gen.generate()
+            self._write("entry-points.json", content)
+            self.updater.mark_generated("entry-points.json", content, sources)
+        else:
+            self.updater.mark_skipped("entry-points.json")
+
+    def _gen_db_schema(self, file_index: FileIndex) -> None:
+        gen = DatabaseSchemaGenerator(self.root, self.config, file_index)
+        content, sources = gen.generate()
+        if content:
+            should, reason = self.updater.should_regenerate("db-schema.txt", sources)
+            if should:
+                print(f"   db-schema.txt ({reason})")
+                self._write("db-schema.txt", content)
+                self.updater.mark_generated("db-schema.txt", content, sources)
+            else:
+                self.updater.mark_skipped("db-schema.txt")
+
+    def _gen_api_contract(self) -> None:
+        gen = ContractsGenerator(self.root, self.config)
+        content, sources = gen.generate()
+        if content:
+            should, reason = self.updater.should_regenerate("api-contract.md", sources)
+            if should:
+                print(f"   api-contract.md ({reason})")
+                self._write("api-contract.md", content)
+                self.updater.mark_generated("api-contract.md", content, sources)
+            else:
+                self.updater.mark_skipped("api-contract.md")
 
     # ── Sequential tasks ──────────────────────────────────────────────────────
 
-    def _generate_env_shape(self) -> None:
-        for env_file in [".env.example", ".env.template", ".env.sample"]:
-            env_path = self.root / env_file
-            if env_path.exists():
-                should_regen, reason = self.updater.should_regenerate(
-                    "env-shape.txt", [env_path]
-                )
-                if should_regen:
-                    print(f"   env-shape.txt — generating ({reason})")
-                    content = self.security.redact_content(
-                        safe_read_text(env_path) or ""
-                    )
+    def _gen_env_shape(self) -> None:
+        for name in [".env.example", ".env.template", ".env.sample"]:
+            path = self.root / name
+            if path.exists():
+                should, reason = self.updater.should_regenerate("env-shape.txt", [path])
+                if should:
+                    print(f"   env-shape.txt ({reason})")
+                    content = self.security.redact_content(safe_read_text(path) or "")
                     self._write("env-shape.txt", content)
-                    self.updater.mark_generated("env-shape.txt", content, [env_path])
+                    self.updater.mark_generated("env-shape.txt", content, [path])
                 else:
-                    print(f"   env-shape.txt — {reason}")
                     self.updater.mark_skipped("env-shape.txt")
                 break
 
-    def _copy_dependency_files(self) -> None:
-        for dep_file in DEP_FILES:
-            dep_path = self.root / dep_file
-            if dep_path.exists():
-                should_regen, reason = self.updater.should_regenerate(
-                    dep_file, [dep_path]
-                )
-                if should_regen:
-                    print(f"   {dep_file} — copying ({reason})")
-                    content = safe_read_text(dep_path) or ""
-                    self._write(dep_file, content)
-                    self.updater.mark_generated(dep_file, content, [dep_path])
+    def _copy_dep_files(self) -> None:
+        for name in DEP_FILES:
+            path = self.root / name
+            if path.exists():
+                should, reason = self.updater.should_regenerate(name, [path])
+                if should:
+                    content = safe_read_text(path) or ""
+                    self._write(name, content)
+                    self.updater.mark_generated(name, content, [path])
                 else:
-                    self.updater.mark_skipped(dep_file)
+                    self.updater.mark_skipped(name)
 
-    def _generate_recent_activity(self) -> None:
-        print("   recent git activity — capturing")
+    def _gen_recent_activity(self) -> None:
+        print("   recent git activity")
         try:
-            for cmd, out_file in [
+            for cmd, fname in [
                 (["git", "log", "--oneline", "-20"], "recent-commits.txt"),
                 (["git", "diff", "--stat", "HEAD~5"], "recent-changes.txt"),
             ]:
@@ -460,65 +448,67 @@ class LLMContextGenerator:
                     cmd, capture_output=True, text=True, cwd=self.root
                 )
                 if result.returncode == 0 and result.stdout:
-                    self._write(out_file, result.stdout)
-                    self.updater.mark_generated(out_file, result.stdout)
+                    self._write(fname, result.stdout)
+                    self.updater.mark_generated(fname, result.stdout)
         except Exception:
-            pass  # Not a git repo or git not installed
+            pass
 
-    def _generate_external_dependencies(self, project: ProjectInfo) -> None:
-        """Bridge to ExternalDependencyDetector in the standalone script."""
-        try:
-            import importlib.util
-            import ccc
-            script_path = Path(ccc.__file__).parent.parent / "llm-context-setup.py"
-            if script_path.exists():
-                spec = importlib.util.spec_from_file_location("_llm_setup", script_path)
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                detector = mod.ExternalDependencyDetector(
-                    self.root, project.languages, project.framework
-                )
-                should_regen, reason = self.updater.should_regenerate(
-                    "external-dependencies.json"
-                )
-                if should_regen:
-                    print(f"   external-dependencies.json — generating ({reason})")
-                    deps = detector.detect()
-                    content = json.dumps(deps, indent=2)
-                    self._write("external-dependencies.json", content)
-                    self.updater.mark_generated(
-                        "external-dependencies.json", content, []
-                    )
-                else:
-                    print(f"   external-dependencies.json — {reason}")
-                    self.updater.mark_skipped("external-dependencies.json")
-            else:
-                print("   external-dependencies.json — skipped (script not found)")
-        except Exception as e:
-            print(f"   external-dependencies.json — skipped ({e})")
+    def _gen_external_deps(
+        self, project: ProjectInfo, file_index: FileIndex
+    ) -> None:
+        gen = ExternalDependencyGenerator(
+            self.root, self.config, file_index,
+            project.languages, project.framework
+        )
+        should, reason = self.updater.should_regenerate("external-dependencies.json")
+        if should:
+            print(f"   external-dependencies.json ({reason})")
+            content, sources = gen.generate()
+            self._write("external-dependencies.json", content)
+            self.updater.mark_generated("external-dependencies.json", content, sources)
+        else:
+            self.updater.mark_skipped("external-dependencies.json")
 
-    def _generate_llm_md(self, project: ProjectInfo) -> None:
-        llm_path = self.root / "LLM.md"
-        should_regen, reason = self.updater.should_regenerate("../LLM.md")
-        if should_regen:
-            print(f"   LLM.md — generating scaffold ({reason})")
+    def _gen_summaries(
+        self, project: ProjectInfo, file_index: FileIndex
+    ) -> None:
+        if not self.security.is_ai_enabled():
+            print("   module summaries skipped (AI disabled in offline mode)")
+            return
+        from .generators.summaries import ModuleSummaryGenerator
+        gen = ModuleSummaryGenerator(self.root, self.config, file_index)
+        results = gen.generate_all()
+        if not results:
+            return
+        modules_dir = self.output_dir / "modules"
+        modules_dir.mkdir(exist_ok=True)
+        for filename, (content, sources) in results.items():
+            safe_write_text(modules_dir / filename, content)
+            self.updater.mark_generated(f"modules/{filename}", content, sources)
+        index, _ = gen.generate()
+        self._write("module-index.md", index)
+        self.updater.mark_generated("module-index.md", index)
+
+    def _gen_llm_md(self, project: ProjectInfo) -> None:
+        path = self.root / "LLM.md"
+        should, reason = self.updater.should_regenerate("../LLM.md")
+        if should:
+            print(f"   LLM.md scaffold ({reason})")
             content = _llm_md_scaffold(project)
-            safe_write_text(llm_path, content)
+            safe_write_text(path, content)
             self.updater.mark_generated("../LLM.md", content, is_new=True)
         else:
-            print(f"   LLM.md — {reason}")
             self.updater.mark_skipped("../LLM.md")
 
-    def _generate_architecture_md(self, project: ProjectInfo) -> None:
-        arch_path = self.root / "ARCHITECTURE.md"
-        should_regen, reason = self.updater.should_regenerate("../ARCHITECTURE.md")
-        if should_regen:
-            print(f"   ARCHITECTURE.md — generating scaffold ({reason})")
+    def _gen_architecture_md(self, project: ProjectInfo) -> None:
+        path = self.root / "ARCHITECTURE.md"
+        should, reason = self.updater.should_regenerate("../ARCHITECTURE.md")
+        if should:
+            print(f"   ARCHITECTURE.md scaffold ({reason})")
             content = _architecture_md_scaffold(project)
-            safe_write_text(arch_path, content)
+            safe_write_text(path, content)
             self.updater.mark_generated("../ARCHITECTURE.md", content, is_new=True)
         else:
-            print(f"   ARCHITECTURE.md — {reason}")
             self.updater.mark_skipped("../ARCHITECTURE.md")
 
 
@@ -528,9 +518,9 @@ def _llm_md_scaffold(project: ProjectInfo) -> str:
     langs = ", ".join(project.languages) if project.languages else "unknown"
     return f"""# {project.name} — LLM Context
 
-> Auto-generated by CCC. Edit this file to add project-specific guidance.
+> Auto-generated by CCC. Edit to add project-specific guidance.
 
-## Project Overview
+## Overview
 
 - **Languages**: {langs}
 - **Framework**: {project.framework}
@@ -538,24 +528,23 @@ def _llm_md_scaffold(project: ProjectInfo) -> str:
 
 ## Key Conventions
 
-- TODO: document coding conventions
-- TODO: document naming conventions
-- TODO: document architectural patterns
+- TODO: coding conventions
+- TODO: naming conventions
+- TODO: architectural patterns
 
 ## Important Areas
 
-- TODO: list critical/dangerous files or modules
-- TODO: list frequently changed areas
-- TODO: list known gotchas
+- TODO: critical / dangerous files
+- TODO: frequently changed areas
+- TODO: known gotchas
 
-## Generated Context Files
+## Generated Context
 
 See `.llm-context/` for auto-extracted context:
-- `tree.txt` — file structure
+- `tree.txt` — structure
 - `routes.txt` — API routes
 - `schemas-extracted.*` — type definitions
-- `dependency-graph.*` — internal imports
-- `symbol-index.json` — symbol navigation map
+- `symbol-index.json` — symbol → file:line map
 - `external-dependencies.json` — service boundary contracts
 """
 
@@ -564,7 +553,7 @@ def _architecture_md_scaffold(project: ProjectInfo) -> str:
     langs = ", ".join(project.languages) if project.languages else "unknown"
     return f"""# {project.name} — Architecture
 
-> Auto-generated by CCC. Edit this file to describe the system architecture.
+> Auto-generated by CCC. Edit to describe the system architecture.
 
 ## Overview
 
@@ -577,11 +566,11 @@ def _architecture_md_scaffold(project: ProjectInfo) -> str:
 
 ## Data Flow
 
-- TODO: describe how data moves through the system
+- TODO: how data moves through the system
 
 ## External Dependencies
 
-- TODO: list external services, APIs, databases
+- TODO: external services, APIs, databases
 
 ## Deployment
 
