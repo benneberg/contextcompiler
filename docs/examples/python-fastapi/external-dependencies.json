@@ -1,0 +1,40 @@
+{
+  "service": "test-fastapi-app",
+  "repository": null,
+  "exposes": {
+    "api": [
+      "DELETE /api/users/{user_id}",
+      "GET /",
+      "GET /api/users/{user_id}",
+      "POST /api/events/track",
+      "POST /api/users"
+    ],
+    "events": [],
+    "types": []
+  },
+  "depends_on": {
+    "apis_consumed": [
+      "GET http://auth-service/validate/{user_id}",
+      "POST http://notification-service/send",
+      "POST https://analytics.example.com/track"
+    ],
+    "databases": [
+      "PostgreSQL",
+      "Redis"
+    ],
+    "external_apis": [],
+    "message_queues": [],
+    "services": [
+      "analytics.example.com",
+      "auth-service",
+      "notification-service"
+    ]
+  },
+  "tags": [
+    "api",
+    "backend-api",
+    "data",
+    "python"
+  ],
+  "detected_at": "2024-01-15 14:30 UTC"
+}
