@@ -3136,7 +3136,12 @@ class LLMContextGenerator:
         
         if gen.get("module_summaries") and not self.quick_mode:
             self._generate_module_summaries(project)
-        
+        # ─────────────────────────────────────────
+        # External dependencies detection
+        # ─────────────────────────────────────────
+        if gen.get("external_dependencies", True):
+            self._generate_external_dependencies(project)
+            
         self.updater.new_manifest.save(self.root)
         
         self.security.log_audit("generate", {"mode": mode})
@@ -3224,7 +3229,26 @@ class LLMContextGenerator:
             else:
                 print(f"  public-api.txt ({reason})")
                 self.updater.mark_skipped("public-api.txt")
-    
+   def _generate_external_dependencies(self, project: ProjectInfo) -> None:
+        """Generate external-dependencies.json."""
+        detector = ExternalDependencyDetector(
+            self.root,
+            project.languages,
+            project.framework
+        )
+        
+        should_regen, reason = self.updater.should_regenerate("external-dependencies.json")
+        
+        if should_regen:
+            print(f"-> Detecting external dependencies... ({reason})")
+            dependencies = detector.detect()
+            content = json.dumps(dependencies, indent=2)
+            self._write("external-dependencies.json", content)
+            self.updater.mark_generated("external-dependencies.json", content, [])
+        else:
+            print(f"  external-dependencies.json ({reason})")
+            self.updater.mark_skipped("external-dependencies.json")    
+            
     def _generate_dependencies(self, project: ProjectInfo, gen: dict) -> None:
         """Generate dependency analysis."""
         analyzer = DependencyAnalyzer(self.root, project.languages)
@@ -3390,19 +3414,19 @@ class LLMContextGenerator:
             pass
     
     def _generate_claude_md(self, project: ProjectInfo) -> None:
-        """Generate CLAUDE.md scaffold."""
-        claude_path = self.root / "CLAUDE.md"
-        should_regen, reason = self.updater.should_regenerate("../CLAUDE.md")
+        """Generate LLM.md scaffold."""
+        claude_path = self.root / "LLM.md"
+        should_regen, reason = self.updater.should_regenerate("../LLM.md")
         
         if should_regen:
-            print(f"-> Generating CLAUDE.md scaffold... ({reason})")
+            print(f"-> Generating LLM.md scaffold... ({reason})")
             scaffold = ScaffoldGenerator(project)
             content = scaffold.generate_claude_md()
             safe_write_text(claude_path, content)
-            self.updater.mark_generated("../CLAUDE.md", content, is_new=True)
+            self.updater.mark_generated("../LLM.md", content, is_new=True)
         else:
-            print(f"  CLAUDE.md ({reason})")
-            self.updater.mark_skipped("../CLAUDE.md")
+            print(f"  LLM.md ({reason})")
+            self.updater.mark_skipped("../LLM.md")
     
     def _generate_architecture_md(self, project: ProjectInfo) -> None:
         """Generate ARCHITECTURE.md scaffold."""
