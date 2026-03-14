@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-llm-context-setup.py - Smart LLM Context Generator with Incremental Updates
+llm-context-setup.py - Single-file distribution wrapper
+This file can work standalone OR import from ccc package if available.
 
 Features:
 - Auto-detects project type and languages
@@ -20,7 +21,6 @@ Usage:
     python3 llm-context-setup.py --force            # Force full regeneration
     python3 llm-context-setup.py --doctor           # Diagnostics
 
-Version: 0.4.0
 """
 
 import subprocess
@@ -106,6 +106,19 @@ SENSITIVE_PATTERNS = [
 UpdateStrategy = Literal["always", "if-changed", "if-missing", "never"]
 SecurityMode = Literal["offline", "private-ai", "public-ai"]
 
+# Try to import from package
+try:
+    from ccc.utils.files import (
+        is_binary_file,
+        safe_read_text,
+        safe_write_text,
+        should_skip_path,
+    )
+    from ccc.utils.hashing import hash_file_quick, compute_fingerprint
+    from ccc.utils.formatting import get_timestamp, human_readable_size
+    USING_PACKAGE = True
+except ImportError:
+    USING_PACKAGE = False
 
 def get_default_config():
     """Return default configuration dictionary."""
