@@ -46,7 +46,15 @@ Exception-based — Use try/except for error handling
 ## Common Tasks
 
 ### Running the Project
-```bash
 # TODO: How to start development
 # TODO: How to run tests
 # TODO: How to build for production
+
+### Adding New Features
+TODO: Step-by-step guide for common additions
+
+### Common Gotchas
+<!-- Things that aren't obvious from reading the code -->
+# TODO: Race conditions to watch for?
+# TODO: Order-dependent operations?
+# TODO: Performance bottlenecks?  
