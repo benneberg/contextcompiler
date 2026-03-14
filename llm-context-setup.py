@@ -4881,6 +4881,22 @@ Examples:
     gen_parser = workspace_subparsers.add_parser("generate", help="Generate workspace context")
     gen_parser.add_argument("--tags", "-t", nargs="+", help="Filter services by tags")
     
+    # workspace conflicts (NEW)
+    conflicts_parser = workspace_subparsers.add_parser(
+        "conflicts",
+        help="Detect cross-repo conflicts and inconsistencies"
+    )
+    conflicts_parser.add_argument("--tags", "-t", nargs="+", help="Filter services by tags")
+    conflicts_parser.add_argument("--output", "-o", help="Output directory for report")
+    
+    # workspace doctor (alias for conflicts)
+    doctor_ws_parser = workspace_subparsers.add_parser(
+        "doctor",
+        help="Check workspace health (alias for conflicts)"
+    )
+    doctor_ws_parser.add_argument("--tags", "-t", nargs="+", help="Filter services by tags")
+    doctor_ws_parser.add_argument("--output", "-o", help="Output directory for report")
+    
     # ─────────────────────────────────────────
     # Single-repo arguments (default command)
     # ─────────────────────────────────────────
