@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Make this file executable: chmod +x tests/run_tests.py
 """
 Test runner for LLM Context Generator.
 
