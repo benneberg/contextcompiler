@@ -31,6 +31,13 @@
 - Wire generator.py to use the above (remove bridge to standalone script)
 - PyPI release
 
+- 	1.	ccc/generators/contracts.py — APIContractExtractor
+	2.	ccc/generators/summaries.py — ModuleSummaryGenerator
+	3.	ccc/generators/external.py — ExternalDependencyDetector (replaces the importlib bridge)
+	4.	Wire all of them into generator.py (remove the bridge)
+	5.	ccc/generators/pkml.py — the ccc pkml command that bootstraps a pkml.json
+	6.	Add ccc pkml to cli.py
+The natural next addition on the CCC side (once you’ve done testing) is a ccc pkml command that bootstraps a pkml.json draft from the generated context — that creates a concrete workflow between the two
 ## Later
 
 - Plugin model for custom language extractors
