@@ -8,6 +8,9 @@ from .config import get_default_config, load_config, deep_merge
 from .security.manager import SecurityManager
 from .utils.files import safe_read_text
 from .workspace import WorkspaceManifest, WorkspaceQuery, ConflictDetector
+from .doctor import DiagnosticTool
+from .watch import watch_mode
+from .generator import LLMContextGenerator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,7 +77,7 @@ Examples:
     parser.add_argument("path", nargs="?", default=".")
     parser.add_argument("--quick-update", "-q", action="store_true")
     parser.add_argument("--force", "-f", action="store_true")
-    parser.add_argument("--watch", "-w", action="store_true")
+    parser.add_argument("--watch", action="store_true")
     parser.add_argument("--with-summaries", action="store_true")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--security-status", action="store_true")
@@ -209,8 +212,20 @@ def main():
         security.print_status()
         return 0
 
-    print("ccc package entry point is active.")
-    print("Workspace mode is now modularized.")
-    print("Next migration step: move single-repo generator/orchestrator into ccc.generator")
-    print(f"Project root: {root}")
+    if args.doctor:
+        tool = DiagnosticTool(root)
+        tool.run()
+        return 0
+
+    if args.watch:
+        watch_mode(root, config, LLMContextGenerator)
+        return 0
+
+    generator = LLMContextGenerator(
+        root=root,
+        config=config,
+        quick_mode=args.quick_update,
+        force=args.force,
+    )
+    generator.generate()
     return 0
