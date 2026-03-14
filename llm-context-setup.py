@@ -2695,7 +2695,347 @@ class ExternalDependencyDetector:
                 for match in re.finditer(pattern, content):
                     event = match.group(1)
                     deps["exposes"]["events"].append(event)
+
+# ──────────────────────────────────────────────
+# External Dependency Detection (Phase 1)
+# ──────────────────────────────────────────────
+
+class ExternalDependencyDetector:
+    """Detect external service dependencies from code patterns."""
+    
+    def __init__(self, root: Path, languages: List[str], framework: str):
+        self.root = root
+        self.languages = languages
+        self.framework = framework
+    
+    def detect(self) -> dict:
+        """
+        Detect external dependencies and API contracts.
+        
+        Returns a dictionary suitable for external-dependencies.json
+        """
+        dependencies = {
+            "service": self.root.name,
+            "repository": self._get_repo_url(),
+            "exposes": {
+                "api": [],
+                "events": [],
+                "types": [],
+            },
+            "depends_on": {
+                "services": set(),
+                "apis_consumed": [],
+                "databases": [],
+                "message_queues": [],
+                "external_apis": [],
+            },
+            "tags": self._auto_detect_tags(),
+            "detected_at": get_timestamp(),
+        }
+        
+        if "python" in self.languages:
+            self._detect_python_dependencies(dependencies)
+        
+        if "typescript" in self.languages or "javascript" in self.languages:
+            self._detect_js_dependencies(dependencies)
+        
+        if "rust" in self.languages:
+            self._detect_rust_dependencies(dependencies)
+        
+        if "go" in self.languages:
+            self._detect_go_dependencies(dependencies)
+        
+        # Convert sets to lists for JSON serialization
+        dependencies["depends_on"]["services"] = sorted(list(dependencies["depends_on"]["services"]))
+        
+        # Deduplicate lists
+        for key in ["api", "events", "types"]:
+            dependencies["exposes"][key] = sorted(list(set(dependencies["exposes"][key])))
+        
+        for key in dependencies["depends_on"]:
+            if isinstance(dependencies["depends_on"][key], list):
+                dependencies["depends_on"][key] = sorted(list(set(dependencies["depends_on"][key])))
+        
+        return dependencies
+    
+    def _get_repo_url(self) -> Optional[str]:
+        """Try to get repository URL from git config."""
+        try:
+            result = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
+    
+    def _auto_detect_tags(self) -> List[str]:
+        """Auto-detect tags based on project structure and framework."""
+        tags = []
+        
+        # Framework-based tags
+        framework_lower = self.framework.lower()
+        if "fastapi" in framework_lower or "flask" in framework_lower or "django" in framework_lower:
+            tags.append("backend-api")
+        if "express" in framework_lower or "nestjs" in framework_lower:
+            tags.append("backend-api")
+        if "react" in framework_lower or "vue" in framework_lower or "angular" in framework_lower:
+            tags.append("frontend")
+        if "nextjs" in framework_lower:
+            tags.extend(["frontend", "ssr"])
+        
+        # Directory-based tags
+        if (self.root / "api").exists() or (self.root / "routes").exists():
+            tags.append("api")
+        if (self.root / "models").exists() or (self.root / "schemas").exists():
+            tags.append("data")
+        if (self.root / "services").exists():
+            tags.append("services")
+        if (self.root / "components").exists() or (self.root / "src" / "components").exists():
+            tags.append("ui")
+        if (self.root / "workers").exists() or (self.root / "tasks").exists():
+            tags.append("background-jobs")
+        if (self.root / "migrations").exists():
+            tags.append("database")
+        
+        # Language-based tags
+        for lang in self.languages:
+            tags.append(lang)
+        
+        return sorted(list(set(tags)))
+    
+    def _detect_python_dependencies(self, deps: dict) -> None:
+        """Detect Python external dependencies and API calls."""
+        
+        http_patterns = [
+            (r'requests\.(get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)', "requests"),
+            (r'httpx\.(get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)', "httpx"),
+            (r'aiohttp\.ClientSession\(\)\.(?:get|post|put|delete)\s*\(\s*["\']([^"\']+)', "aiohttp"),
+        ]
+        
+        grpc_patterns = [
+            r'import\s+grpc',
+            r'from\s+grpc\s+import',
+        ]
+        
+        database_patterns = [
+            (r'psycopg2', "PostgreSQL"),
+            (r'pymongo', "MongoDB"),
+            (r'redis', "Redis"),
+            (r'sqlalchemy.*postgresql', "PostgreSQL"),
+            (r'sqlalchemy.*mysql', "MySQL"),
+            (r'motor', "MongoDB"),
+        ]
+        
+        message_queue_patterns = [
+            (r'kafka', "Kafka"),
+            (r'celery', "Celery/Redis"),
+            (r'pika', "RabbitMQ"),
+            (r'boto3.*sqs', "AWS SQS"),
+        ]
+        
+        event_patterns = [
+            (r'@event\.emit\s*\(\s*["\']([^"\']+)', "event_emit"),
+            (r'@EventPattern\s*\(\s*["\']([^"\']+)', "nestjs_event"),
+            (r'\.publish\s*\(\s*["\']([^"\']+)', "publish"),
+            (r'\.send_event\s*\(\s*["\']([^"\']+)', "send_event"),
+        ]
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
+            # Detect HTTP calls
+            for pattern, lib in http_patterns:
+                for match in re.finditer(pattern, content):
+                    if len(match.groups()) >= 2:
+                        method = match.group(1).upper()
+                        url = match.group(2)
+                    else:
+                        url = match.group(1)
+                        method = "GET"
                     
+                    # Check if external call (starts with http or contains domain)
+                    if url.startswith("http") or "." in url:
+                        deps["depends_on"]["apis_consumed"].append(f"{method} {url}")
+                        
+                        # Try to extract service name from URL
+                        service_match = re.search(r'https?://([^/:\s]+)', url)
+                        if service_match:
+                            service = service_match.group(1)
+                            if service not in ["localhost", "127.0.0.1"]:
+                                deps["depends_on"]["services"].add(service)
+                    # Internal API reference
+                    elif url.startswith("/api/"):
+                        deps["exposes"]["api"].append(f"{method} {url}")
+            
+            # Detect gRPC usage
+            for pattern in grpc_patterns:
+                if re.search(pattern, content):
+                    deps["depends_on"]["services"].add("grpc-service")
+                    break
+            
+            # Detect database connections
+            for pattern, db_name in database_patterns:
+                if re.search(pattern, content, re.IGNORECASE):
+                    if db_name not in deps["depends_on"]["databases"]:
+                        deps["depends_on"]["databases"].append(db_name)
+            
+            # Detect message queues
+            for pattern, mq_name in message_queue_patterns:
+                if re.search(pattern, content, re.IGNORECASE):
+                    if mq_name not in deps["depends_on"]["message_queues"]:
+                        deps["depends_on"]["message_queues"].append(mq_name)
+            
+            # Detect event emissions
+            for pattern, event_type in event_patterns:
+                for match in re.finditer(pattern, content):
+                    event_name = match.group(1)
+                    deps["exposes"]["events"].append(event_name)
+            
+            # Detect external API keys (service dependencies)
+            external_api_patterns = [
+                (r'STRIPE_', "Stripe"),
+                (r'TWILIO_', "Twilio"),
+                (r'SENDGRID_', "SendGrid"),
+                (r'AWS_', "AWS"),
+                (r'GOOGLE_CLOUD_', "Google Cloud"),
+                (r'AZURE_', "Azure"),
+            ]
+            
+            for pattern, service in external_api_patterns:
+                if re.search(pattern, content):
+                    if service not in deps["depends_on"]["external_apis"]:
+                        deps["depends_on"]["external_apis"].append(service)
+    
+    def _detect_js_dependencies(self, deps: dict) -> None:
+        """Detect JavaScript/TypeScript external dependencies."""
+        
+        http_patterns = [
+            (r'fetch\s*\(\s*["`\']([^"`\']+)', "fetch"),
+            (r'axios\.(get|post|put|delete|patch)\s*\(\s*["`\']([^"`\']+)', "axios"),
+            (r'http\.(get|post|put|delete)\s*\(\s*["`\']([^"`\']+)', "http"),
+        ]
+        
+        database_patterns = [
+            (r'mongoose\.connect', "MongoDB"),
+            (r'new Pool\(.*postgres', "PostgreSQL"),
+            (r'createClient\(.*redis', "Redis"),
+            (r'@prisma/client', "Database (Prisma)"),
+        ]
+        
+        message_queue_patterns = [
+            (r'kafkajs', "Kafka"),
+            (r'amqplib', "RabbitMQ"),
+            (r'bull', "Redis Queue"),
+        ]
+        
+        file_patterns = ["*.ts", "*.tsx", "*.js", "*.jsx"]
+        
+        for pattern in file_patterns:
+            for js_file in self.root.rglob(pattern):
+                if should_skip_path(js_file):
+                    continue
+                
+                content = safe_read_text(js_file)
+                if not content:
+                    continue
+                
+                # Detect HTTP calls
+                for http_pattern, lib in http_patterns:
+                    for match in re.finditer(http_pattern, content):
+                        if len(match.groups()) >= 2:
+                            method = match.group(1).upper()
+                            url = match.group(2)
+                        else:
+                            url = match.group(1)
+                            method = "GET"
+                        
+                        if url.startswith("http") or url.startswith("${"):
+                            deps["depends_on"]["apis_consumed"].append(f"{method} {url}")
+                            
+                            service_match = re.search(r'https?://([^/:\s]+)', url)
+                            if service_match:
+                                service = service_match.group(1)
+                                if service not in ["localhost", "127.0.0.1"]:
+                                    deps["depends_on"]["services"].add(service)
+                        elif url.startswith("/api/"):
+                            deps["exposes"]["api"].append(f"{method} {url}")
+                
+                # Detect database connections
+                for pattern, db_name in database_patterns:
+                    if re.search(pattern, content):
+                        if db_name not in deps["depends_on"]["databases"]:
+                            deps["depends_on"]["databases"].append(db_name)
+                
+                # Detect message queues
+                for pattern, mq_name in message_queue_patterns:
+                    if re.search(pattern, content):
+                        if mq_name not in deps["depends_on"]["message_queues"]:
+                            deps["depends_on"]["message_queues"].append(mq_name)
+    
+    def _detect_rust_dependencies(self, deps: dict) -> None:
+        """Detect Rust external dependencies."""
+        
+        cargo_toml = self.root / "Cargo.toml"
+        if not cargo_toml.exists():
+            return
+        
+        content = safe_read_text(cargo_toml)
+        if not content:
+            return
+        
+        # Detect HTTP clients
+        if re.search(r'reqwest\s*=', content):
+            deps["depends_on"]["services"].add("http-client")
+        
+        # Detect databases
+        if re.search(r'sqlx\s*=', content):
+            deps["depends_on"]["databases"].append("Database (SQLx)")
+        if re.search(r'diesel\s*=', content):
+            deps["depends_on"]["databases"].append("Database (Diesel)")
+        if re.search(r'redis\s*=', content):
+            deps["depends_on"]["databases"].append("Redis")
+        
+        # Detect gRPC
+        if re.search(r'tonic\s*=', content):
+            deps["depends_on"]["services"].add("grpc")
+    
+    def _detect_go_dependencies(self, deps: dict) -> None:
+        """Detect Go external dependencies."""
+        
+        go_mod = self.root / "go.mod"
+        if not go_mod.exists():
+            return
+        
+        content = safe_read_text(go_mod)
+        if not content:
+            return
+        
+        # Detect HTTP clients
+        if "net/http" in content or "github.com/go-resty" in content:
+            deps["depends_on"]["services"].add("http-client")
+        
+        # Detect databases
+        if "gorm.io" in content or "database/sql" in content:
+            deps["depends_on"]["databases"].append("Database")
+        if "github.com/go-redis" in content:
+            deps["depends_on"]["databases"].append("Redis")
+        if "go.mongodb.org" in content:
+            deps["depends_on"]["databases"].append("MongoDB")
+        
+        # Detect gRPC
+        if "google.golang.org/grpc" in content:
+            deps["depends_on"]["services"].add("grpc")
+
 class LLMContextGenerator:
     """Main orchestrator."""
     
