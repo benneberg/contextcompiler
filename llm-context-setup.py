@@ -4720,7 +4720,7 @@ class WorkspaceQuery:
 
 def workspace_command(args) -> int:
     """Handle workspace subcommands."""
-    workspace_file = Path(args.workspace) if args.workspace else None
+    workspace_file = Path(args.workspace) if hasattr(args, 'workspace') and args.workspace else None
     
     # Find workspace file
     if not workspace_file:
@@ -4754,25 +4754,55 @@ def workspace_command(args) -> int:
     
     query = WorkspaceQuery(manifest)
     
-    if args.workspace_command == "list":
+    workspace_cmd = getattr(args, 'workspace_command', None)
+    
+    if workspace_cmd == "list":
         query.list_services()
     
-    elif args.workspace_command == "query":
-        if args.tags:
-            query.query_tags(args.tags, generate_context=args.generate)
-        elif args.service:
-            query.query_service(args.service, what=args.what or "all")
+    elif workspace_cmd == "query":
+        tags = getattr(args, 'tags', None)
+        service = getattr(args, 'service', None)
+        what = getattr(args, 'what', 'all')
+        generate = getattr(args, 'generate', False)
+        
+        if tags:
+            query.query_tags(tags, generate_context=generate)
+        elif service:
+            query.query_service(service, what=what)
         else:
             print("\n  Error: Specify --tags or --service")
             return 1
     
-    elif args.workspace_command == "validate":
+    elif workspace_cmd == "validate":
         query.validate_workspace()
     
-    elif args.workspace_command == "generate":
-        tags = args.tags if args.tags else None
+    elif workspace_cmd == "generate":
+        tags = getattr(args, 'tags', None)
         services = manifest.query_by_tags(tags) if tags else list(manifest.services.values())
         query._generate_workspace_context(services)
+    
+    elif workspace_cmd == "conflicts" or workspace_cmd == "doctor":
+        # Conflict detection
+        tags = getattr(args, 'tags', None)
+        output = getattr(args, 'output', None)
+        
+        services = manifest.query_by_tags(tags) if tags else list(manifest.services.values())
+        
+        detector = ConflictDetector(manifest)
+        conflicts = detector.analyze(services)
+        
+        detector.print_summary()
+        
+        # Generate report
+        output_dir = Path(output) if output else manifest.root / "workspace-context"
+        report = detector.generate_report(output_dir)
+        
+        print(f"  Report saved to: {output_dir / 'conflicts-report.md'}")
+        
+        # Return error code if errors found
+        errors = [c for c in conflicts if c.severity == "error"]
+        if errors:
+            return 1
     
     else:
         print("\n  Error: Unknown workspace command")
@@ -4782,6 +4812,7 @@ def workspace_command(args) -> int:
         print("    workspace query --service X - Get service details")
         print("    workspace validate          - Validate workspace")
         print("    workspace generate          - Generate workspace context")
+        print("    workspace conflicts         - Detect cross-repo conflicts")
         return 1
     
     return 0
