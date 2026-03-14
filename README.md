@@ -1,594 +1,318 @@
 # CCC — Code Context Compiler
 
-**Generate structured, LLM-optimized project knowledge from codebases and workspaces.**
+**Turn any codebase into structured, LLM-ready knowledge.**
 
-CCC is a developer tool for extracting high-signal context from repositories and turning it into a reusable knowledge layer for LLMs, onboarding, architecture understanding, and cross-repository change planning.
+CCC scans your repositories and generates a `.llm-context/` directory containing everything an LLM needs to understand and work with your code — without flooding the context window with raw source.
 
-CCC generates **PKML** — a structured markdown- and JSON-based knowledge format that captures the parts of a codebase that matter most: APIs, schemas, contracts, dependencies, conventions, entry points, architecture, and cross-repo relationships.
+```bash
+pip install ccc-contextcompiler
+ccc generate
+```
 
----
+-----
 
 ## Why CCC Exists
 
-Modern codebases are too large, too distributed, and too implicit.
+Modern codebases are too large, too distributed, and too implicit for LLMs to work with directly.
 
-LLMs can help implement, refactor, and explain code — but only if they receive the **right context**. Feeding an entire repository into a model is expensive, noisy, and usually counterproductive.
-
-At the same time, the most valuable engineering knowledge is rarely documented:
+The most valuable engineering knowledge is rarely documented:
 
 - which modules are important
-- what conventions a team follows
+- what conventions the team follows
 - where dangerous code lives
 - which services depend on which
 - in what order changes must land across repositories
-- where a new feature should be implemented
 
-CCC exists to make that knowledge **extractable, structured, portable, and reusable**.
+CCC makes that knowledge **extractable, structured, portable, and reusable**.
 
----
+-----
 
-## What Problem It Solves
+## How It Works
 
-CCC is built for three real-world problems:
+CCC builds a single file index from one scan of your repository, then runs all generators in parallel to produce structured context files:
 
-### 1. LLM Context Compression
-Instead of copying large codebases into prompts, CCC produces targeted context files that an LLM can actually use well.
+```
+your-project/
+├── .llm-context/
+│   ├── tree.txt                    # directory structure
+│   ├── routes.txt                  # API route map
+│   ├── public-api.txt              # exported function signatures
+│   ├── schemas-extracted.py        # dataclasses, Pydantic models, enums
+│   ├── types-extracted.ts          # TypeScript interfaces, types, enums
+│   ├── dependency-graph.txt        # internal import relationships
+│   ├── dependency-graph.md         # same as Mermaid diagram
+│   ├── symbol-index.json           # symbol → file:line navigation map
+│   ├── external-dependencies.json  # what this service exposes and consumes
+│   ├── env-shape.txt               # environment variable template
+│   ├── recent-commits.txt          # last 20 commits
+│   ├── manifest.json               # generation metadata for incremental updates
+│   └── .ccc-hashcache.json         # mtime-gated hash cache
+├── LLM.md                          # conventions scaffold (if-missing)
+└── ARCHITECTURE.md                 # architecture scaffold (if-missing)
+```
 
-### 2. Repository Understanding
-CCC gives developers and AI assistants a compressed understanding of a repository’s structure, APIs, schemas, dependencies, and conventions.
-
-### 3. Multi-Repository Discovery and Coordination
-In multi-service systems, CCC helps answer:
-- Which repos are involved in this task?
-- What needs to change in each one?
-- In what order should those changes land?
-
-This is especially important in microservice and platform-heavy organizations where cross-repo knowledge is usually tribal knowledge.
-
----
-
-## What Is PKML?
-
-**PKML** stands for **Project Knowledge Markdown Language**.
-
-PKML is the structured knowledge format that CCC generates and works with.
-
-It is not a programming language. It is a **portable project knowledge layer** built from markdown and machine-readable companion files.
-
-PKML exists to standardize how repositories describe:
-
-- architecture
-- conventions
-- boundaries
-- dependencies
-- schemas
-- routes
-- symbols
-- extension points
-- workspace-level relationships
-
-### Why PKML matters
-
-Most repositories have code, but not knowledge.
-
-PKML gives repositories a standard way to expose that knowledge in a format that is:
-
-- readable by humans
-- usable by LLMs
-- version-controllable
-- composable across multiple repositories
-- incrementally maintainable
-
-### PKML is designed to be:
-
-- **LLM-friendly** — optimized for prompt context and retrieval
-- **human-editable** — important judgment remains editable in markdown
-- **machine-generated where possible** — avoid manual drudgery
-- **layered** — single-repo and multi-repo knowledge can build on each other
-- **non-invasive** — does not require changing your application architecture
-
-### PKML Files
-
-A PKML-enabled repository typically contains:
-
-- `LLM.md` — project-specific conventions and guidance
-- `ARCHITECTURE.md` — system-level understanding
-- `.llm-context/tree.txt` — file structure
-- `.llm-context/routes.txt` — API routes
-- `.llm-context/public-api.txt` — exported/public functions
-- `.llm-context/schemas-extracted.*` — types and schemas
-- `.llm-context/dependency-graph.*` — internal dependency structure
-- `.llm-context/symbol-index.json` — symbol navigation
-- `.llm-context/entry-points.json` — runtime entry points
-- `.llm-context/external-dependencies.json` — repo boundary declaration
-- `workspace-context/*` — cross-repo PKML outputs in workspace mode
-
-In other words:
-
-> **CCC is the compiler. PKML is the output format and emerging standard.**
-
----
-
-## What Is CCC?
-
-CCC is the reference implementation and generator for PKML.
-
-It scans repositories, extracts code intelligence, and builds PKML files automatically.
-
-CCC supports:
-
-- single-repository context generation
-- incremental updates
-- security-aware operation
-- workspace / multi-repository mode
-- conflict detection across services
-- optional LLM-generated module summaries
-
----
-
-## Core Concepts
-
-### Single-Repo Mode
-CCC analyzes one repository and generates `.llm-context/`, `CLAUDE.md`, and `ARCHITECTURE.md`.
-
-### Workspace Mode
-CCC reads multiple PKML-enabled repositories via a `ccc-workspace.yml` manifest and generates cross-repo context and dependency insights.
-
-### Boundary Declarations
-Each repository generates an `external-dependencies.json` file describing what it exposes and what it depends on externally. This is the foundation of workspace mode.
-
-### Conflict Detection
-CCC can detect cross-repo inconsistencies such as:
-
-- enum mismatches
-- type/interface drift
-- constant drift
-- API route mismatches
-- naming inconsistencies
-
----
-
-## Features
-
-### Single-Repository Features
-
-CCC generates a `.llm-context/` directory with:
-
-- 📁 **File tree** — project structure overview
-- 🔷 **Type definitions** — extracted schemas, interfaces, dataclasses
-- 🛣️ **API routes** — route map and endpoint overview
-- 📝 **Public API** — exported/public function signatures
-- 🔗 **Dependency graph** — internal import relationships
-- 🗺️ **Symbol index** — symbol navigation by class/function/type
-- 🎯 **Entry points** — main files, servers, and executables
-- 🗄️ **Database schema** — extracted model/schema information
-- 🌐 **External dependencies** — repo boundary contracts
-- 📋 **CLAUDE.md** — conventions, gotchas, dangerous areas
-- 🏗️ **ARCHITECTURE.md** — architecture scaffold
-
-### Multi-Repository Features
-
-Workspace mode adds:
-
-- service discovery by tags
-- dependency ordering
-- workspace-level context generation
-- cross-repo API mapping
-- change sequencing
-- dependency graph visualization
-- conflict detection across repos
-
----
-
-## Security Modes
-
-CCC supports three security modes:
-
-### Offline
-No external AI APIs. Safe default for proprietary repositories.
-
-### Private-AI
-Use internal infrastructure such as Azure OpenAI or self-hosted models.
-
-### Public-AI
-Use external providers such as OpenAI or Anthropic.
-
-CCC also supports:
-
-- automatic secret redaction
-- audit logging
-- exclusion of sensitive files and directories
-
----
+-----
 
 ## Installation
 
-## Option 1 — Single File
-
-Download and run:
+### Option 1 — Install as a package (recommended)
 
 ```bash
-curl -O https://raw.githubusercontent.com/benneberg/ccc/main/llm-context-setup.py
-python3 llm-context-setup.py --doctor
+pip install ccc-contextcompiler
+ccc generate
 ```
 
-## Option 2 — Add to a Repository
+With optional dependencies:
 
 ```bash
-wget -O llm-context-setup.py https://raw.githubusercontent.com/yourusername/ccc/main/llm-context-setup.py
+pip install "ccc-contextcompiler[yaml]"    # YAML config + workspace manifests
+pip install "ccc-contextcompiler[watch]"   # watch mode
+pip install "ccc-contextcompiler[ai]"      # LLM-powered module summaries
+pip install "ccc-contextcompiler[all]"     # everything
+```
+
+### Option 2 — Run the standalone script
+
+```bash
+curl -O https://raw.githubusercontent.com/benneberg/contextcompiler/main/llm-context-setup.py
 python3 llm-context-setup.py
 ```
 
-## Option 3 — Package / Installed CLI (in progress)
-
-The repository is being modularized into the `ccc/` package so it can support an installable CLI in addition to the single-file entrypoint.
-
-Planned command:
+### Option 3 — Editable install from source
 
 ```bash
-pip install ccc
+git clone https://github.com/benneberg/contextcompiler
+cd contextcompiler
+pip install -e .
 ccc generate
-ccc workspace query --tags core
 ```
 
----
+**Requirements:** Python 3.10+. No mandatory dependencies — core generation works with zero installs.
 
-## Requirements
-
-### Required
-- Python 3.10+
-
-### Optional
-```bash
-pip install pyyaml       # YAML config and workspace manifests
-pip install watchdog     # watch mode
-pip install anthropic    # LLM summaries
-pip install openai       # LLM summaries
-```
-
----
+-----
 
 ## Quick Start
 
-### 1. Diagnose the environment
-
 ```bash
-python3 llm-context-setup.py --doctor
+# Check your environment
+ccc --doctor
+
+# Generate context for the current directory
+ccc generate
+
+# Fast incremental update (skips unchanged files)
+ccc --quick-update
+
+# Force full regeneration
+ccc --force
+
+# Watch for file changes and auto-update
+ccc --watch
 ```
 
-### 2. Generate repository context
-
-```bash
-python3 llm-context-setup.py
-```
-
-### 3. Incrementally update after changes
-
-```bash
-python3 llm-context-setup.py --quick-update
-```
-
-### 4. Watch for file changes
-
-```bash
-python3 llm-context-setup.py --watch
-```
-
----
+-----
 
 ## Single-Repository Usage
 
-### Generate PKML context for a repository
-
 ```bash
-python3 llm-context-setup.py
+# Generate context for a specific path
+ccc generate /path/to/project
+
+# Generate with AI-powered module summaries
+ccc --with-summaries
+
+# Show security configuration
+ccc --security-status
+
+# Custom output directory
+ccc --output .context
 ```
 
-### Force regeneration
+-----
 
-```bash
-python3 llm-context-setup.py --force
-```
+## Output Files
 
-### Show security configuration
+|File                        |Contents                                        |
+|----------------------------|------------------------------------------------|
+|`tree.txt`                  |Annotated directory structure                   |
+|`routes.txt`                |API route map (FastAPI, Flask, Express, NestJS) |
+|`public-api.txt`            |Exported function signatures                    |
+|`schemas-extracted.py`      |Python dataclasses, Pydantic models, enums      |
+|`types-extracted.ts`        |TypeScript interfaces, types, enums             |
+|`dependency-graph.txt`      |Internal import relationships                   |
+|`dependency-graph.md`       |Mermaid dependency diagram                      |
+|`symbol-index.json`         |Symbol → file:line navigation index             |
+|`external-dependencies.json`|Service boundary contracts                      |
+|`env-shape.txt`             |Environment variable shape (from `.env.example`)|
+|`recent-commits.txt`        |Last 20 git commits                             |
+|`LLM.md`                    |Conventions and gotchas scaffold                |
+|`ARCHITECTURE.md`           |Architecture description scaffold               |
 
-```bash
-python3 llm-context-setup.py --security-status
-```
+-----
 
-### Generate with module summaries
+## Language Support
 
-```bash
-python3 llm-context-setup.py --with-summaries
-```
+|Language  |Schemas|Routes|Signatures|Deps|
+|----------|-------|------|----------|----|
+|Python    |✓      |✓     |✓         |✓   |
+|TypeScript|✓      |✓     |✓         |✓   |
+|JavaScript|—      |✓     |—         |✓   |
+|Rust      |✓      |—     |—         |—   |
+|Go        |✓      |—     |—         |—   |
+|C#        |✓      |—     |—         |—   |
 
----
+-----
 
-## Output Example
+## Multi-Repository (Workspace) Mode
 
-A typical repository will end up with:
+CCC can coordinate across multiple services using a workspace manifest.
 
-```text
-your-project/
-├── .llm-context/
-│   ├── tree.txt
-│   ├── schemas-extracted.py
-│   ├── types-extracted.ts
-│   ├── routes.txt
-│   ├── public-api.txt
-│   ├── dependency-graph.txt
-│   ├── dependency-graph.md
-│   ├── symbol-index.json
-│   ├── entry-points.json
-│   ├── db-schema.txt
-│   ├── api-contract.md
-│   ├── env-shape.txt
-│   ├── recent-commits.txt
-│   ├── external-dependencies.json
-│   ├── manifest.json
-│   └── audit.log
-├── LLM.md
-├── ARCHITECTURE.md
-└── llm-context.yml
-```
-
----
-
-## Multi-Repository Mode
-
-CCC supports multi-repository workspaces via a workspace manifest.
-
-### Workspace Manifest
-
-Create `ccc-workspace.yml`:
+### Create `ccc-workspace.yml`
 
 ```yaml
-name: streaming-platform
+name: my-platform
 version: 1
 
 services:
-  client:
-    path: ./client
-    type: frontend
-    tags: [platforms, ui, player]
-
-  pairing-service:
-    path: ./pairing-service
-    type: backend-api
-    tags: [platforms, devices, pairing]
-    depends_on: [cms-db, auth-service]
-
-  cms-db:
-    path: ./cms-db
-    type: data
-    tags: [platforms, content, schema]
-
   auth-service:
     path: ./auth-service
     type: backend-api
-    tags: [auth, security]
+    tags: [auth, security, core]
+
+  user-service:
+    path: ./user-service
+    type: backend-api
+    tags: [users, core]
+    depends_on: [auth-service]
+
+  api-gateway:
+    path: ./api-gateway
+    type: backend-api
+    tags: [gateway, core]
+    depends_on: [auth-service, user-service]
 ```
 
 ### Workspace Commands
 
-List services:
-
 ```bash
-python3 llm-context-setup.py workspace list
+# List all services
+ccc workspace list
+
+# Query by tags
+ccc workspace query --tags core
+
+# Inspect a specific service and its dependencies
+ccc workspace query --service auth-service --what all
+
+# Validate paths and dependency declarations
+ccc workspace validate
+
+# Generate cross-repo context (WORKSPACE.md, change-sequence.md, etc.)
+ccc workspace generate
+
+# Detect conflicts across services
+ccc workspace conflicts
+
+# Alias for conflicts
+ccc workspace doctor
 ```
 
-Query by tags:
+### Workspace Output
 
-```bash
-python3 llm-context-setup.py workspace query --tags platforms
+```
+workspace-context/
+├── WORKSPACE.md          # service map and connection overview
+├── cross-repo-api.txt    # cross-service API call map
+├── change-sequence.md    # dependency-ordered change plan
+├── dependency-graph.md   # Mermaid graph of service relationships
+└── conflicts-report.md   # detected inconsistencies
 ```
 
-Inspect a specific service:
-
-```bash
-python3 llm-context-setup.py workspace query --service pairing-service --what all
-```
-
-Validate the workspace:
-
-```bash
-python3 llm-context-setup.py workspace validate
-```
-
-Generate workspace context:
-
-```bash
-python3 llm-context-setup.py workspace generate
-```
-
----
+-----
 
 ## Conflict Detection
 
-Workspace mode can detect cross-repo inconsistencies.
+`ccc workspace conflicts` scans all services and reports:
 
-### Detect conflicts
+|Conflict Type       |Severity|Example                                                    |
+|--------------------|--------|-----------------------------------------------------------|
+|Enum mismatch       |Error   |`UserStatus` has different values in two services          |
+|Interface drift     |Warning |`UserProfile` has different fields across services         |
+|Constant mismatch   |Warning |`MAX_RETRY` is `3` in one service and `5` in another       |
+|API route mismatch  |Warning |Service calls `/users/:id` but provider exposes `/user/:id`|
+|Event naming        |Info    |Mix of `user.created` and `userCreated` event names        |
+|Naming inconsistency|Info    |`UserId` vs `userId` vs `user_id` across services          |
+
+-----
+
+## Symbol Index
+
+`symbol-index.json` provides a flat navigation map for LLMs and tooling:
+
+```json
+{
+  "_meta": {
+    "generated": "2025-03-14 10:00 UTC",
+    "total_symbols": 342
+  },
+  "symbols": {
+    "UserService.create_user": { "file": "services/user.py", "line": 42, "kind": "method" },
+    "AuthMiddleware":          { "file": "middleware/auth.py", "line": 10, "kind": "class" },
+    "POST /api/users":         { "file": "routes/users.py", "line": 88, "kind": "route" },
+    "UserSchema":              { "file": "schemas/user.py", "line": 15, "kind": "class" }
+  }
+}
+```
+
+This lets an LLM resolve `UserService.create_user` to an exact file and line rather than searching through source.
+
+-----
+
+## Incremental Updates
+
+CCC tracks what was generated and skips files that haven’t changed:
 
 ```bash
-python3 llm-context-setup.py workspace conflicts
+ccc --quick-update   # fastest: skips db_schema and module_summaries
+ccc generate         # normal: respects if-changed strategy
+ccc --force          # regenerates everything unconditionally
 ```
 
-### Alias
+Update strategies per file (configurable in `llm-context.yml`):
 
-```bash
-python3 llm-context-setup.py workspace doctor
+|Strategy    |Behaviour                                               |
+|------------|--------------------------------------------------------|
+|`always`    |Regenerate every run (tree, recent-commits)             |
+|`if-changed`|Regenerate only when source files change                |
+|`if-missing`|Generate once, never overwrite (LLM.md, ARCHITECTURE.md)|
+
+A mtime-gated hash cache (`.ccc-hashcache.json`) makes incremental runs near-instant for large repos.
+
+-----
+
+## Security Modes
+
+```yaml
+# llm-context.yml
+security:
+  mode: offline       # default — no external AI calls
+  redact_secrets: true
+  audit_log: true
 ```
 
-### Example detected conflicts
+|Mode        |Description                                             |
+|------------|--------------------------------------------------------|
+|`offline`   |No external AI APIs. Safe for proprietary repositories. |
+|`private-ai`|Use internal infrastructure (Azure OpenAI, self-hosted).|
+|`public-ai` |Use external providers (Anthropic, OpenAI).             |
 
-- enum mismatch across services
-- type/interface field drift
-- constant value mismatch
-- route mismatch between provider and consumer
-- inconsistent naming conventions
+CCC also automatically redacts secrets and skips sensitive paths (`.env`, `keys/`, `certs/`, etc.).
 
-### Generated report
-
-```text
-workspace-context/
-└── conflicts-report.md
-```
-
----
-
-## Workspace Context Output
-
-Workspace mode generates:
-
-```text
-workspace-context/
-├── WORKSPACE.md
-├── cross-repo-api.txt
-├── change-sequence.md
-├── dependency-graph.md
-└── conflicts-report.md
-```
-
-### WORKSPACE.md
-High-level description of services and how they connect.
-
-### cross-repo-api.txt
-Cross-service API call mapping.
-
-### change-sequence.md
-Recommended order of changes derived from dependency relationships.
-
-### dependency-graph.md
-Mermaid graph of service relationships.
-
-### conflicts-report.md
-Detected inconsistencies across repos.
-
----
-
-## Why `external-dependencies.json` Matters
-
-Every repository can generate:
-
-```text
-.llm-context/external-dependencies.json
-```
-
-This file is the boundary declaration for a service.
-
-It tells CCC:
-
-- what this repo exposes
-- what APIs it consumes
-- which services it depends on
-- which databases and queues it uses
-- which tags it belongs to
-
-This file is the **bridge** between single-repo PKML and workspace PKML.
-
----
-
-## TypeScript Support
-
-TypeScript is a first-class target and currently the most heavily optimized language in CCC.
-
-CCC detects:
-
-- exported interfaces and types
-- enums and constants
-- Express routes
-- Next.js route handlers and server actions
-- NestJS controllers and event patterns
-- tRPC procedures and routers
-- GraphQL client usage
-- Prisma, TypeORM, Drizzle, Mongoose patterns
-- fetch / axios / got / ky requests
-- queues and event systems
-- WebSocket usage
-- third-party SDK integration patterns
-
-Because many modern multi-repo systems are TypeScript-heavy, workspace mode is especially effective there.
-
----
-
-## Development Status
-
-CCC is currently in an active modularization phase.
-
-### What already exists
-- single-file working generator
-- incremental updates
-- external dependency detection
-- workspace query mode
-- workspace context generation
-- cross-repo conflict detection
-- tests and fixtures
-- package skeleton (`ccc/`) in progress
-
-### What is currently being built
-- modular package architecture
-- migration from giant single file to importable package
-- cleaner CLI separation
-- extractors/generators split into modules
-
-### Planned
-- installable CLI package
-- richer language extractor plugin model
-- improved workspace aggregation
-- better conflict intelligence
-- optional semantic retrieval
-- stronger CI packaging and release process
-
----
-
-## Project Structure
-
-Current / target structure:
-
-```text
-contextcompiler/
-├── llm-context-setup.py
-├── ccc/
-│   ├── cli.py
-│   ├── config.py
-│   ├── models.py
-│   ├── manifest.py
-│   ├── security/
-│   ├── utils/
-│   ├── extractors/
-│   ├── generators/
-│   └── workspace/
-├── tests/
-├── docs/
-└── README.md
-```
-
----
-
-## Example Workflow
-
-### Single repository
-
-```bash
-python3 llm-context-setup.py --doctor
-python3 llm-context-setup.py
-python3 llm-context-setup.py --quick-update
-```
-
-### Multi-repository
-
-```bash
-python3 llm-context-setup.py workspace validate
-python3 llm-context-setup.py workspace query --tags platforms
-python3 llm-context-setup.py workspace generate
-python3 llm-context-setup.py workspace conflicts
-```
-
----
+-----
 
 ## Configuration
 
-Create `llm-context.yml`:
+Create `llm-context.yml` in your project root:
 
 ```yaml
 output_dir: .llm-context
@@ -606,110 +330,177 @@ generate:
   dependencies: true
   dependency_graph_mermaid: true
   symbol_index: true
-  entry_points: true
-  db_schema: true
-  api_contract: true
-  external_dependencies: true
+  env_shape: true
   recent_activity: true
+  external_dependencies: true
   claude_md_scaffold: true
   architecture_md_scaffold: true
-  module_summaries: false
+  module_summaries: false   # requires AI mode
 
 llm_summaries:
   provider: anthropic
-  model: claude-sonnet-4-20250514
+  model: claude-haiku-4-5-20251001
   max_modules: 30
 ```
 
----
+-----
+
+## Architecture
+
+CCC is built around four performance principles:
+
+**1. Single filesystem scan**
+`FileIndex` walks the repository once at startup. Every generator filters the index instead of re-scanning disk. For a 100k-file repo this reduces scan time from ~20s to ~3s.
+
+**2. Parallel generation**
+All independent generators (tree, schemas, routes, API, dependencies, symbols) run concurrently via `ThreadPoolExecutor`. Typical speedup: 4–5×.
+
+**3. Streaming detection**
+Framework detection reads files line-by-line and stops on the first match. Never loads entire files into memory.
+
+**4. Mtime-gated hash cache**
+`HashCache` skips rehashing files whose mtime hasn’t changed. Incremental runs on large repos become near-instant.
+
+```
+LLMContextGenerator
+ │
+ ├── FileIndex          single scan, shared by all generators
+ ├── HashCache          mtime → hash cache for fast incrementals
+ ├── ProjectDetector    uses FileIndex, streaming framework detection
+ │
+ ├── [parallel]
+ │   ├── TreeGenerator
+ │   ├── SchemaGenerator
+ │   ├── APIGenerator
+ │   ├── DependencyGenerator
+ │   └── SymbolIndexGenerator
+ │
+ └── [sequential]
+     ├── env-shape, dep files, git activity
+     ├── ExternalDependencyDetector
+     └── LLM.md / ARCHITECTURE.md scaffolds
+```
+
+-----
+
+## Relationship to PKML
+
+CCC and [PKML](https://github.com/benneberg/pkml) are complementary tools that form a complete knowledge layer for AI-assisted development:
+
+|            |CCC                        |PKML                                 |
+|------------|---------------------------|-------------------------------------|
+|**Input**   |Source code                |Human-written product descriptions   |
+|**Output**  |`.llm-context/` files      |`pkml.json` product knowledge file   |
+|**Answers** |*How does this code work?* |*What does this product do?*         |
+|**Audience**|Developers, AI coding tools|Developers, PMs, marketing, AI agents|
+
+**Together:** CCC generates the technical context; PKML captures the product intent. An LLM that has both can understand what a system is *supposed* to do and how it’s actually built.
+
+CCC can bootstrap a `pkml.json` draft from your codebase, which you then refine in the [PKML editor](https://github.com/benneberg/pkml).
+
+-----
+
+## Package Structure
+
+```
+contextcompiler/
+├── llm-context-setup.py      standalone single-file entrypoint
+├── pyproject.toml            package definition and CLI registration
+├── ccc/
+│   ├── cli.py                argument parsing and command dispatch
+│   ├── generator.py          main orchestrator (parallel execution)
+│   ├── file_index.py         FileIndex + HashCache
+│   ├── config.py             defaults and config loading
+│   ├── manifest.py           SmartUpdater + GenerationManifest
+│   ├── models.py             shared dataclasses
+│   ├── doctor.py             diagnostics
+│   ├── watch.py              file watcher
+│   ├── extractors/
+│   │   ├── python.py         Python AST extractor
+│   │   └── typescript.py     TypeScript/JS extractor
+│   ├── generators/
+│   │   ├── tree.py           directory tree
+│   │   ├── schemas.py        type definitions (5 languages)
+│   │   ├── api.py            routes + public signatures
+│   │   ├── dependencies.py   import graph + Mermaid
+│   │   └── symbols.py        semantic symbol index
+│   ├── security/
+│   │   ├── manager.py        security orchestration
+│   │   ├── modes.py          mode definitions
+│   │   └── redactor.py       secret redaction
+│   ├── utils/
+│   │   ├── files.py          safe read/write, path filtering
+│   │   ├── formatting.py     timestamps, human sizes
+│   │   └── hashing.py        file hashing
+│   └── workspace/
+│       ├── manifest.py       workspace YAML parsing
+│       ├── query.py          service querying and context generation
+│       ├── conflicts.py      cross-repo conflict detection
+│       └── aggregator.py     workspace aggregation
+└── tests/
+    ├── unit/                 extractor and generator tests
+    ├── integration/          full generation tests
+    └── fixtures/             Python FastAPI, TypeScript Express, multi-repo
+```
+
+-----
 
 ## Testing
 
-Install test dependencies:
-
 ```bash
 pip install -r tests/requirements.txt
-```
-
-Run tests:
-
-```bash
 python tests/run_tests.py --verbose
 ```
 
-Integration fixtures currently include:
-- Python FastAPI example
-- TypeScript Express example
-- Multi-repo workspace example
+Tests run against real fixture projects (Python FastAPI, TypeScript Express, multi-repo workspace) to catch regressions during refactoring.
 
----
+CI runs on Python 3.10, 3.11, and 3.12 via GitHub Actions.
+
+-----
 
 ## Roadmap
 
-### Near-term
-- complete modularization into `ccc/`
-- move workspace mode fully into package
-- move doctor/watch/generator into package
-- split extractors and generators by concern
+**Near-term**
 
-### Mid-term
-- installable CLI
-- stronger TypeScript/NestJS/Next.js support
-- richer workspace aggregation
-- more complete cross-repo sequencing
+- Complete migration of remaining generators from `llm-context-setup.py` into `ccc/`
+- PyPI release (`pip install ccc-contextcompiler`)
+- Entry points for db schema and API contract generators
 
-### Long-term
-- PKML as a documented standard
-- multiple PKML producers and consumers
-- semantic retrieval and local indexing
-- editor/IDE integration
-- enterprise/private-ai deployment workflows
+**Mid-term**
 
----
+- Plugin model for custom language extractors
+- Richer TypeScript support (NestJS, tRPC, Next.js App Router)
+- Improved workspace aggregation and change sequencing
+
+**Long-term**
+
+- PKML as a published standard with a JSON Schema
+- Semantic retrieval and local vector indexing
+- Editor/IDE integration
+- Enterprise deployment workflows
+
+-----
 
 ## Contributing
 
-Contributions are welcome.
+Contributions are welcome. Especially valuable:
 
-Especially valuable areas:
-- language extractors
-- TypeScript framework support
-- conflict detection improvements
-- PKML documentation
-- real-world output examples
-- tests for edge cases
-- packaging and release automation
+- Language extractors (Java, Ruby, Go routes, Rust routes)
+- TypeScript framework patterns (NestJS, tRPC, Prisma, Drizzle)
+- Conflict detection improvements
+- Real-world output examples and documentation
+- Test coverage for edge cases
 
----
-
-## Positioning
-
-CCC is not just a repo summarizer.
-
-It is better understood as:
-
-> **a compiler for repository knowledge**
-
-And PKML is the output format that makes that knowledge reusable.
-
-That is the long-term direction:
-- repositories become self-describing
-- workspaces become navigable
-- LLM context becomes structured instead of improvised
-- tribal knowledge becomes version-controlled knowledge
-
----
+-----
 
 ## License
 
-MIT
+MIT — see <LICENSE>.
 
----
+-----
 
 ## Status
 
-Early but serious.
+**Functional and actively developed.**
 
-CCC is already useful today in single-repo and workspace mode, and is being actively evolved toward a stable modular architecture and a more explicit PKML standard.
-
-If you are working with LLM-assisted development, multi-repo architecture navigation, or structured developer knowledge, this is exactly the problem space CCC is built for.
+Both single-repo and workspace mode work today. The `ccc` package is modular and installable. The standalone `llm-context-setup.py` remains available as a zero-dependency fallback.
