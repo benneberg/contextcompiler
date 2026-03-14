@@ -41,7 +41,7 @@ id: UUID
 email: str
 created_at: datetime
 
-### `CLAUDE.md`
+### `LLM.md`
 
 Error handling: Result pattern
 Async usage: heavy
@@ -59,7 +59,7 @@ These files provide **the structural map of the codebase**.
 ```bash
 curl -O https://raw.githubusercontent.com/yourusername/ccc/main/llm-context-setup.py
 python3 llm-context-setup.py
-
+```
 Core requirements:
 
 Python 3.10+
@@ -125,7 +125,7 @@ Using Context Files With LLMs
 Typical workflow:
 
 Upload the following files when starting an LLM session:
-	1.	CLAUDE.md
+	1.	LLM.md
 	2.	ARCHITECTURE.md
 	3.	.llm-context/schemas-extracted.py
 	4.	.llm-context/routes.txt
@@ -252,12 +252,60 @@ your-project/
   dependency-graph.txt
   symbol-index.json
 
-CLAUDE.md
+LLM.md
 ARCHITECTURE.md
 llm-context.yml
 llm-context-setup.py
 
+## What It Does
 
+Generates a `.llm-context/` directory with:
+
+- 📁 **File tree** — Project structure overview
+- 🔷 **Type definitions** — Extracted schemas, interfaces, dataclasses
+- 🛣️ **API routes** — All endpoints mapped
+- 📝 **Public API** — Function signatures across the codebase
+- 🔗 **Dependency graph** — Import relationships (text + Mermaid diagram)
+- 🌐 **External dependencies** — Service calls, APIs, databases detected  ← NEW!
+- 🗺️ **Symbol index** — Navigate classes and functions
+- 🎯 **Entry points** — Main files, servers, CLI tools
+- 🗄️ **Database schema** — SQLAlchemy, Django, Prisma models
+- 📋 **CLAUDE.md** — Auto-detected conventions
+- 🏗️ **ARCHITECTURE.md** — System design scaffold
+
+### External Dependencies Detection
+
+The tool automatically detects and documents:
+
+✅ **External API calls** — HTTP requests to other services  
+✅ **Service dependencies** — Which external services you call  
+✅ **Database connections** — PostgreSQL, MongoDB, Redis, etc.  
+✅ **Message queues** — Kafka, RabbitMQ, Celery, etc.  
+✅ **Third-party APIs** — Stripe, Twilio, AWS, etc.  
+✅ **Exposed APIs** — Endpoints your service provides  
+✅ **Auto-detected tags** — Categorization for workspace queries  
+
+**Example `external-dependencies.json`:**
+
+```json
+{
+  "service": "user-service",
+  "exposes": {
+    "api": ["GET /api/users/{id}", "POST /api/users"],
+    "events": ["user.created", "user.updated"]
+  },
+  "depends_on": {
+    "services": ["auth-service", "notification-service"],
+    "apis_consumed": [
+      "GET http://auth-service/validate",
+      "POST http://notification-service/send"
+    ],
+    "databases": ["PostgreSQL", "Redis"],
+    "message_queues": ["Celery/Redis"]
+  },
+  "tags": ["backend-api", "users", "python"]
+}
+```
 ⸻
 
 Roadmap
