@@ -1,0 +1,20 @@
+{
+  "name": "test-express-app",
+  "version": "0.1.0",
+  "description": "Test Express application for LLM context generator",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "ts-node src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.20",
+    "@types/node": "^20.9.0",
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1"
+  }
+}
