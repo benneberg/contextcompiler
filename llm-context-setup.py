@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llm-context-setup.py - Single-file distribution
+llm-context-setup.py - Single-file distribution wrapper
 
 This file can work standalone OR use the ccc package if available.
 When the package is available, it delegates to ccc.cli.main().
@@ -46,7 +46,12 @@ from datetime import datetime, timezone
 
 VERSION = "0.4.0"
 
-# Try to use installed package
+# If the modular ccc package is available, delegate to it.
+# Otherwise, run the embedded standalone implementation below.
+import sys
+
+USING_PACKAGE = False
+
 try:
     from ccc.cli import main as ccc_main
     USING_PACKAGE = True
@@ -54,7 +59,6 @@ except ImportError:
     USING_PACKAGE = False
 
 if USING_PACKAGE:
-    # Delegate to package
     if __name__ == "__main__":
         sys.exit(ccc_main())
 else:
