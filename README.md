@@ -316,6 +316,26 @@ ccc workspace query --service auth-service --what depends-on-me
 ```
 
 ⸻
+### How to:
+#### Test feature on the fixture
+1.Navigate to the Python fixture
+cd tests/fixtures/python-fastapi
+
+2.Run the generator
+python ../../../llm-context-setup.py
+
+3.Check the output
+cat .llm-context/external-dependencies.json
+
+You should see:
+- Service name detected
+- Exposed APIs (/api/users, etc.)
+- External service calls (auth-service, notification-service)
+- Dependencies detected
+- Tags auto-assigned
+
+
+
 
 Roadmap
 
