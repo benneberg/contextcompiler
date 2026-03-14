@@ -169,6 +169,7 @@ def get_default_config():
             "module_summaries": False,
             "symbol_index": True,
             "entry_points": True,
+            "external_dependencies": True,
         },
         "llm_summaries": {
             "provider": "anthropic",
@@ -196,6 +197,7 @@ def get_default_config():
             "modules/*.md": "if-changed",
             "../CLAUDE.md": "if-missing",
             "../ARCHITECTURE.md": "if-missing",
+            "external-dependencies.json": "if-changed",
         },
     }
 
