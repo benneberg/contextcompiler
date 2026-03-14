@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-llm-context-setup.py - Single-file distribution wrapper
-This file can work standalone OR import from ccc package if available.
+llm-context-setup.py - Single-file distribution
+
+This file can work standalone OR use the ccc package if available.
+When the package is available, it delegates to ccc.cli.main().
+Otherwise, it includes all functionality inline
+
 
 Features:
 - Auto-detects project type and languages
@@ -41,6 +45,36 @@ from datetime import datetime, timezone
 
 
 VERSION = "0.4.0"
+
+# Try to use installed package
+try:
+    from ccc.cli import main as ccc_main
+    USING_PACKAGE = True
+except ImportError:
+    USING_PACKAGE = False
+
+if USING_PACKAGE:
+    # Delegate to package
+    if __name__ == "__main__":
+        sys.exit(ccc_main())
+else:
+# Embedded standalone version - Wrapper starts
+    
+# Try to import from package
+try:
+    from ccc.utils.files import (
+        is_binary_file,
+        safe_read_text,
+        safe_write_text,
+        should_skip_path,
+    )
+    from ccc.utils.hashing import hash_file_quick, compute_fingerprint
+    from ccc.utils.formatting import get_timestamp, human_readable_size
+    USING_PACKAGE = True
+except ImportError:
+    USING_PACKAGE = False
+
+
 MANIFEST_VERSION = "4"
 
 
@@ -105,20 +139,6 @@ SENSITIVE_PATTERNS = [
 
 UpdateStrategy = Literal["always", "if-changed", "if-missing", "never"]
 SecurityMode = Literal["offline", "private-ai", "public-ai"]
-
-# Try to import from package
-try:
-    from ccc.utils.files import (
-        is_binary_file,
-        safe_read_text,
-        safe_write_text,
-        should_skip_path,
-    )
-    from ccc.utils.hashing import hash_file_quick, compute_fingerprint
-    from ccc.utils.formatting import get_timestamp, human_readable_size
-    USING_PACKAGE = True
-except ImportError:
-    USING_PACKAGE = False
 
 def get_default_config():
     """Return default configuration dictionary."""
