@@ -4099,74 +4099,821 @@ def watch_mode(root: Path, config: dict) -> None:
     
     observer.join()
 
+# ──────────────────────────────────────────────
+# Workspace Mode (Phase 3)
+# ──────────────────────────────────────────────
 
+@dataclass
+class ServiceConfig:
+    """Configuration for a service in the workspace."""
+    name: str
+    path: Path
+    service_type: str
+    tags: List[str]
+    depends_on: List[str]
+    description: str
+    
+    def exists(self) -> bool:
+        """Check if service path exists."""
+        return self.path.exists()
+
+
+@dataclass
+class WorkspaceManifest:
+    """Parsed workspace configuration."""
+    name: str
+    version: str
+    root: Path
+    services: Dict[str, ServiceConfig]
+    
+    @classmethod
+    def load(cls, workspace_file: Path) -> "WorkspaceManifest":
+        """Load and parse workspace manifest."""
+        try:
+            import yaml
+            content = safe_read_text(workspace_file)
+            if not content:
+                raise ValueError(f"Could not read {workspace_file}")
+            data = yaml.safe_load(content)
+        except ImportError:
+            # Try JSON fallback
+            content = safe_read_text(workspace_file)
+            if not content:
+                raise ValueError(f"Could not read {workspace_file}")
+            if workspace_file.suffix in [".yml", ".yaml"]:
+                raise ImportError("PyYAML required for workspace manifests: pip install pyyaml")
+            data = json.loads(content)
+        
+        services = {}
+        for name, config in data.get("services", {}).items():
+            path_str = config.get("path", f"./{name}")
+            path = (workspace_file.parent / path_str).resolve()
+            
+            services[name] = ServiceConfig(
+                name=name,
+                path=path,
+                service_type=config.get("type", "unknown"),
+                tags=config.get("tags", []),
+                depends_on=config.get("depends_on", []),
+                description=config.get("description", ""),
+            )
+        
+        return cls(
+            name=data.get("name", "workspace"),
+            version=str(data.get("version", "1")),
+            root=workspace_file.parent.resolve(),
+            services=services,
+        )
+    
+    def query_by_tags(self, tags: List[str]) -> List[ServiceConfig]:
+        """Find services matching any of the given tags."""
+        if not tags:
+            return list(self.services.values())
+        
+        results = []
+        for service in self.services.values():
+            if any(tag.lower() in [t.lower() for t in service.tags] for tag in tags):
+                results.append(service)
+        return results
+    
+    def query_by_service(self, service_name: str) -> Optional[ServiceConfig]:
+        """Get a specific service by name."""
+        return self.services.get(service_name)
+    
+    def get_dependents(self, service_name: str) -> List[ServiceConfig]:
+        """Get services that depend on the given service."""
+        dependents = []
+        for service in self.services.values():
+            if service_name in service.depends_on:
+                dependents.append(service)
+        return dependents
+    
+    def get_dependencies(self, service_name: str) -> List[ServiceConfig]:
+        """Get services that the given service depends on."""
+        service = self.services.get(service_name)
+        if not service:
+            return []
+        
+        dependencies = []
+        for dep_name in service.depends_on:
+            if dep_name in self.services:
+                dependencies.append(self.services[dep_name])
+        return dependencies
+    
+    def get_dependency_order(self, services: List[ServiceConfig] = None) -> List[ServiceConfig]:
+        """
+        Order services by dependencies (topological sort).
+        Services with no dependencies come first.
+        """
+        if services is None:
+            services = list(self.services.values())
+        
+        service_names = {s.name for s in services}
+        
+        # Build adjacency list
+        graph = {s.name: [] for s in services}
+        in_degree = {s.name: 0 for s in services}
+        
+        for service in services:
+            for dep in service.depends_on:
+                if dep in service_names:
+                    graph[dep].append(service.name)
+                    in_degree[service.name] += 1
+        
+        # Kahn's algorithm
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        result = []
+        
+        while queue:
+            node = queue.pop(0)
+            result.append(self.services[node])
+            
+            for neighbor in graph[node]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+        
+        # If we couldn't process all nodes, there's a cycle
+        if len(result) != len(services):
+            # Return original order with warning
+            print("  Warning: Circular dependency detected")
+            return services
+        
+        return result
+    
+    def validate(self) -> List[str]:
+        """Validate workspace configuration and return list of issues."""
+        issues = []
+        
+        for name, service in self.services.items():
+            # Check if path exists
+            if not service.path.exists():
+                issues.append(f"Service '{name}': path does not exist: {service.path}")
+            
+            # Check dependencies exist
+            for dep in service.depends_on:
+                if dep not in self.services:
+                    issues.append(f"Service '{name}': unknown dependency '{dep}'")
+        
+        return issues
+
+
+class WorkspaceQuery:
+    """Query workspace for services and dependencies."""
+    
+    def __init__(self, manifest: WorkspaceManifest):
+        self.manifest = manifest
+    
+    def query_tags(self, tags: List[str], generate_context: bool = False) -> None:
+        """Query services by tags and print results."""
+        services = self.manifest.query_by_tags(tags)
+        
+        if not services:
+            print(f"\n  No services found with tags: {', '.join(tags)}")
+            print(f"\n  Available tags:")
+            all_tags = set()
+            for s in self.manifest.services.values():
+                all_tags.update(s.tags)
+            for tag in sorted(all_tags):
+                print(f"    - {tag}")
+            return
+        
+        print(f"\n{'='*60}")
+        print(f"  Workspace: {self.manifest.name}")
+        print(f"  Query: tags={tags}")
+        print(f"{'='*60}")
+        print(f"\n  Found {len(services)} service(s):\n")
+        
+        for service in services:
+            deps = ", ".join(service.depends_on) if service.depends_on else "none"
+            status = "✓" if service.exists() else "✗"
+            print(f"  {status} {service.name:20s} [{service.service_type:12s}]")
+            print(f"      Path: {service.path}")
+            print(f"      Tags: {', '.join(service.tags)}")
+            print(f"      Depends on: {deps}")
+            if service.description:
+                print(f"      Description: {service.description}")
+            print()
+        
+        # Show dependency order
+        ordered = self.manifest.get_dependency_order(services)
+        print(f"  Suggested change sequence (from dependency graph):\n")
+        for i, service in enumerate(ordered, 1):
+            hint = self._get_change_hint(service)
+            print(f"    {i}. {service.name:20s} <- {hint}")
+        
+        print()
+        
+        if generate_context:
+            self._generate_workspace_context(services)
+    
+    def query_service(
+        self,
+        service_name: str,
+        what: str = "info"
+    ) -> None:
+        """Query information about a specific service."""
+        service = self.manifest.query_by_service(service_name)
+        
+        if not service:
+            print(f"\n  Service '{service_name}' not found.")
+            print(f"\n  Available services:")
+            for name in sorted(self.manifest.services.keys()):
+                print(f"    - {name}")
+            return
+        
+        print(f"\n{'='*60}")
+        print(f"  Service: {service.name}")
+        print(f"{'='*60}\n")
+        
+        if what == "info" or what == "all":
+            print(f"  Type: {service.service_type}")
+            print(f"  Path: {service.path}")
+            print(f"  Tags: {', '.join(service.tags)}")
+            print(f"  Description: {service.description or 'N/A'}")
+            print()
+        
+        if what == "depends-on" or what == "all":
+            print(f"  Dependencies (services this depends on):")
+            deps = self.manifest.get_dependencies(service_name)
+            if deps:
+                for dep in deps:
+                    print(f"    -> {dep.name} [{dep.service_type}]")
+            else:
+                print(f"    (none)")
+            print()
+        
+        if what == "dependents" or what == "all":
+            print(f"  Dependents (services that depend on this):")
+            dependents = self.manifest.get_dependents(service_name)
+            if dependents:
+                for dep in dependents:
+                    print(f"    <- {dep.name} [{dep.service_type}]")
+            else:
+                print(f"    (none)")
+            print()
+        
+        if what == "external" or what == "all":
+            self._show_external_dependencies(service)
+    
+    def list_services(self) -> None:
+        """List all services in the workspace."""
+        print(f"\n{'='*60}")
+        print(f"  Workspace: {self.manifest.name} (v{self.manifest.version})")
+        print(f"  Root: {self.manifest.root}")
+        print(f"{'='*60}\n")
+        
+        print(f"  Services ({len(self.manifest.services)}):\n")
+        
+        for name, service in sorted(self.manifest.services.items()):
+            status = "✓" if service.exists() else "✗"
+            tags_str = ", ".join(service.tags[:3])
+            if len(service.tags) > 3:
+                tags_str += f" +{len(service.tags) - 3} more"
+            
+            print(f"  {status} {name:20s} [{service.service_type:12s}] tags: {tags_str}")
+        
+        print()
+        
+        # Show all available tags
+        all_tags = set()
+        for s in self.manifest.services.values():
+            all_tags.update(s.tags)
+        
+        print(f"  Available tags: {', '.join(sorted(all_tags))}")
+        print()
+    
+    def validate_workspace(self) -> None:
+        """Validate workspace configuration."""
+        print(f"\n{'='*60}")
+        print(f"  Workspace Validation: {self.manifest.name}")
+        print(f"{'='*60}\n")
+        
+        issues = self.manifest.validate()
+        
+        if issues:
+            print(f"  Found {len(issues)} issue(s):\n")
+            for issue in issues:
+                print(f"  ✗ {issue}")
+        else:
+            print(f"  ✓ All {len(self.manifest.services)} services validated successfully")
+        
+        # Check for context files
+        print(f"\n  Context file status:\n")
+        for name, service in sorted(self.manifest.services.items()):
+            context_dir = service.path / ".llm-context"
+            ext_deps = context_dir / "external-dependencies.json"
+            
+            if not service.exists():
+                print(f"  ✗ {name:20s} - service path missing")
+            elif not context_dir.exists():
+                print(f"  ⚠ {name:20s} - no .llm-context/ (run: ccc generate)")
+            elif not ext_deps.exists():
+                print(f"  ⚠ {name:20s} - no external-dependencies.json")
+            else:
+                print(f"  ✓ {name:20s} - ready")
+        
+        print()
+    
+    def _get_change_hint(self, service: ServiceConfig) -> str:
+        """Get a hint about what to change in this service."""
+        hints = {
+            "data": "update schema/config first",
+            "database": "update schema/config first",
+            "backend-api": "implement business logic",
+            "api": "implement endpoints",
+            "frontend": "update UI components",
+            "library": "update shared types/utilities",
+            "gateway": "update routing configuration",
+        }
+        return hints.get(service.service_type, "review and update")
+    
+    def _show_external_dependencies(self, service: ServiceConfig) -> None:
+        """Show external dependencies from generated context."""
+        ext_deps_file = service.path / ".llm-context" / "external-dependencies.json"
+        
+        if not ext_deps_file.exists():
+            print(f"  External dependencies: (not generated)")
+            print(f"    Run: cd {service.path} && ccc generate")
+            return
+        
+        try:
+            content = safe_read_text(ext_deps_file)
+            if not content:
+                return
+            
+            deps = json.loads(content)
+            
+            print(f"  External Dependencies (from code analysis):\n")
+            
+            if deps.get("exposes", {}).get("api"):
+                print(f"    Exposes APIs:")
+                for api in deps["exposes"]["api"][:10]:
+                    print(f"      {api}")
+                if len(deps["exposes"]["api"]) > 10:
+                    print(f"      ... and {len(deps['exposes']['api']) - 10} more")
+            
+            if deps.get("depends_on", {}).get("services"):
+                print(f"\n    Depends on services:")
+                for svc in deps["depends_on"]["services"]:
+                    print(f"      -> {svc}")
+            
+            if deps.get("depends_on", {}).get("databases"):
+                print(f"\n    Databases:")
+                for db in deps["depends_on"]["databases"]:
+                    print(f"      - {db}")
+            
+            if deps.get("depends_on", {}).get("external_apis"):
+                print(f"\n    Third-party APIs:")
+                for api in deps["depends_on"]["external_apis"]:
+                    print(f"      - {api}")
+            
+            print()
+            
+        except Exception as e:
+            print(f"  Error reading external dependencies: {e}")
+    
+    def _generate_workspace_context(self, services: List[ServiceConfig]) -> None:
+        """Generate cross-repo workspace context."""
+        print(f"  Generating workspace context...")
+        
+        output_dir = self.manifest.root / "workspace-context"
+        output_dir.mkdir(exist_ok=True)
+        
+        # Collect external dependencies from all services
+        all_deps = {}
+        for service in services:
+            ext_deps_file = service.path / ".llm-context" / "external-dependencies.json"
+            if ext_deps_file.exists():
+                content = safe_read_text(ext_deps_file)
+                if content:
+                    all_deps[service.name] = json.loads(content)
+        
+        # Generate WORKSPACE.md
+        self._generate_workspace_md(services, all_deps, output_dir)
+        
+        # Generate cross-repo API map
+        self._generate_cross_repo_api(services, all_deps, output_dir)
+        
+        # Generate change sequence
+        self._generate_change_sequence(services, output_dir)
+        
+        # Generate dependency graph (Mermaid)
+        self._generate_dependency_graph(services, all_deps, output_dir)
+        
+        print(f"\n  Generated workspace context in: {output_dir}")
+        print(f"    - WORKSPACE.md")
+        print(f"    - cross-repo-api.txt")
+        print(f"    - change-sequence.md")
+        print(f"    - dependency-graph.md")
+        print()
+    
+    def _generate_workspace_md(
+        self,
+        services: List[ServiceConfig],
+        all_deps: Dict,
+        output_dir: Path
+    ) -> None:
+        """Generate WORKSPACE.md overview."""
+        lines = [
+            f"# {self.manifest.name} — Workspace Context",
+            "",
+            f"Generated: {get_timestamp()}",
+            "",
+            "## Services in This Workspace",
+            "",
+            "| Service | Type | Tags | Dependencies |",
+            "|---------|------|------|--------------|",
+        ]
+        
+        for service in services:
+            tags = ", ".join(service.tags[:3])
+            deps = ", ".join(service.depends_on) if service.depends_on else "-"
+            lines.append(f"| {service.name} | {service.service_type} | {tags} | {deps} |")
+        
+        lines.extend([
+            "",
+            "## How They Connect",
+            "",
+        ])
+        
+        # Show API connections
+        connections = []
+        for service in services:
+            if service.name in all_deps:
+                deps = all_deps[service.name]
+                for consumed in deps.get("depends_on", {}).get("apis_consumed", []):
+                    # Try to match to a service
+                    for other in services:
+                        if other.name in consumed or other.name.replace("-", "") in consumed:
+                            connections.append(f"{service.name} -> {other.name}")
+                            break
+        
+        if connections:
+            lines.append("```")
+            for conn in sorted(set(connections)):
+                lines.append(conn)
+            lines.append("```")
+        else:
+            lines.append("(No direct API connections detected)")
+        
+        lines.extend([
+            "",
+            "## Service Details",
+            "",
+        ])
+        
+        for service in services:
+            lines.append(f"### {service.name}")
+            lines.append("")
+            lines.append(f"- **Type**: {service.service_type}")
+            lines.append(f"- **Path**: `{service.path}`")
+            lines.append(f"- **Tags**: {', '.join(service.tags)}")
+            if service.description:
+                lines.append(f"- **Description**: {service.description}")
+            
+            if service.name in all_deps:
+                deps = all_deps[service.name]
+                
+                if deps.get("exposes", {}).get("api"):
+                    lines.append("")
+                    lines.append("**Exposes:**")
+                    for api in deps["exposes"]["api"][:5]:
+                        lines.append(f"- `{api}`")
+                    if len(deps["exposes"]["api"]) > 5:
+                        lines.append(f"- ... and {len(deps['exposes']['api']) - 5} more")
+                
+                if deps.get("depends_on", {}).get("databases"):
+                    lines.append("")
+                    lines.append("**Databases:**")
+                    for db in deps["depends_on"]["databases"]:
+                        lines.append(f"- {db}")
+            
+            lines.append("")
+        
+        content = "\n".join(lines)
+        safe_write_text(output_dir / "WORKSPACE.md", content)
+    
+    def _generate_cross_repo_api(
+        self,
+        services: List[ServiceConfig],
+        all_deps: Dict,
+        output_dir: Path
+    ) -> None:
+        """Generate cross-repo API call map."""
+        lines = [
+            "# Cross-Repository API Calls",
+            f"# Generated: {get_timestamp()}",
+            "",
+        ]
+        
+        for service in services:
+            if service.name not in all_deps:
+                continue
+            
+            deps = all_deps[service.name]
+            consumed = deps.get("depends_on", {}).get("apis_consumed", [])
+            
+            if consumed:
+                lines.append(f"## {service.name}")
+                lines.append("")
+                for api in consumed:
+                    lines.append(f"  -> {api}")
+                lines.append("")
+        
+        content = "\n".join(lines)
+        safe_write_text(output_dir / "cross-repo-api.txt", content)
+    
+    def _generate_change_sequence(
+        self,
+        services: List[ServiceConfig],
+        output_dir: Path
+    ) -> None:
+        """Generate change sequence based on dependencies."""
+        ordered = self.manifest.get_dependency_order(services)
+        
+        lines = [
+            "# Change Sequence",
+            "",
+            f"Generated: {get_timestamp()}",
+            "",
+            "Recommended order for implementing changes across services:",
+            "",
+        ]
+        
+        for i, service in enumerate(ordered, 1):
+            lines.append(f"## {i}. {service.name}")
+            lines.append("")
+            lines.append(f"- **Type**: {service.service_type}")
+            lines.append(f"- **Path**: `{service.path}`")
+            
+            if service.depends_on:
+                lines.append(f"- **Depends on**: {', '.join(service.depends_on)}")
+                lines.append("")
+                lines.append("*Ensure the above services are updated first.*")
+            else:
+                lines.append("")
+                lines.append("*No dependencies - can be updated first.*")
+            
+            lines.append("")
+        
+        content = "\n".join(lines)
+        safe_write_text(output_dir / "change-sequence.md", content)
+    
+    def _generate_dependency_graph(
+        self,
+        services: List[ServiceConfig],
+        all_deps: Dict,
+        output_dir: Path
+    ) -> None:
+        """Generate Mermaid dependency graph."""
+        lines = [
+            "# Dependency Graph",
+            "",
+            "```mermaid",
+            "graph TD",
+        ]
+        
+        # Add service nodes
+        for service in services:
+            node_id = service.name.replace("-", "_")
+            lines.append(f"  {node_id}[{service.name}]")
+        
+        lines.append("")
+        
+        # Add dependency edges
+        edges_added = set()
+        for service in services:
+            node_id = service.name.replace("-", "_")
+            
+            # From workspace manifest dependencies
+            for dep in service.depends_on:
+                dep_id = dep.replace("-", "_")
+                edge = f"{node_id} --> {dep_id}"
+                if edge not in edges_added:
+                    lines.append(f"  {edge}")
+                    edges_added.add(edge)
+            
+            # From code-detected dependencies
+            if service.name in all_deps:
+                for svc in all_deps[service.name].get("depends_on", {}).get("services", []):
+                    # Try to match to workspace services
+                    for other in services:
+                        if other.name in svc or svc in other.name:
+                            other_id = other.name.replace("-", "_")
+                            edge = f"{node_id} -.-> {other_id}"
+                            if edge not in edges_added and node_id != other_id:
+                                lines.append(f"  {edge}")
+                                edges_added.add(edge)
+        
+        lines.extend([
+            "```",
+            "",
+            "**Legend:**",
+            "- Solid arrows (`-->`) = declared dependencies in workspace manifest",
+            "- Dashed arrows (`-.->`) = detected from code analysis",
+        ])
+        
+        content = "\n".join(lines)
+        safe_write_text(output_dir / "dependency-graph.md", content)
+
+
+def workspace_command(args) -> int:
+    """Handle workspace subcommands."""
+    workspace_file = Path(args.workspace) if args.workspace else None
+    
+    # Find workspace file
+    if not workspace_file:
+        for filename in ["ccc-workspace.yml", "ccc-workspace.yaml", "ccc-workspace.json"]:
+            if Path(filename).exists():
+                workspace_file = Path(filename)
+                break
+    
+    if not workspace_file or not workspace_file.exists():
+        print("\n  Error: No workspace file found.")
+        print("\n  Create a ccc-workspace.yml file with your service configuration.")
+        print("\n  Example:")
+        print("    name: my-platform")
+        print("    version: 1")
+        print("    services:")
+        print("      my-service:")
+        print("        path: ./my-service")
+        print("        type: backend-api")
+        print("        tags: [api, core]")
+        print()
+        return 1
+    
+    try:
+        manifest = WorkspaceManifest.load(workspace_file)
+    except ImportError as e:
+        print(f"\n  Error: {e}")
+        return 1
+    except Exception as e:
+        print(f"\n  Error loading workspace: {e}")
+        return 1
+    
+    query = WorkspaceQuery(manifest)
+    
+    if args.workspace_command == "list":
+        query.list_services()
+    
+    elif args.workspace_command == "query":
+        if args.tags:
+            query.query_tags(args.tags, generate_context=args.generate)
+        elif args.service:
+            query.query_service(args.service, what=args.what or "all")
+        else:
+            print("\n  Error: Specify --tags or --service")
+            return 1
+    
+    elif args.workspace_command == "validate":
+        query.validate_workspace()
+    
+    elif args.workspace_command == "generate":
+        tags = args.tags if args.tags else None
+        services = manifest.query_by_tags(tags) if tags else list(manifest.services.values())
+        query._generate_workspace_context(services)
+    
+    else:
+        print("\n  Error: Unknown workspace command")
+        print("\n  Available commands:")
+        print("    workspace list              - List all services")
+        print("    workspace query --tags X    - Find services by tags")
+        print("    workspace query --service X - Get service details")
+        print("    workspace validate          - Validate workspace")
+        print("    workspace generate          - Generate workspace context")
+        return 1
+    
+    return 0
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Generate LLM context files for a codebase",
+        description="LLM Context Generator - Generate context files for LLMs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Single repository mode
   python llm-context-setup.py                    # Full generation
   python llm-context-setup.py --quick-update     # Fast incremental update
   python llm-context-setup.py --force            # Force full regeneration
   python llm-context-setup.py --watch            # Watch mode
   python llm-context-setup.py --doctor           # Run diagnostics
-  python llm-context-setup.py --with-summaries   # Include LLM module summaries
+
+  # Workspace mode (multi-repo)
+  python llm-context-setup.py workspace list
+  python llm-context-setup.py workspace query --tags api
+  python llm-context-setup.py workspace query --service auth-service --what all
+  python llm-context-setup.py workspace validate
+  python llm-context-setup.py workspace generate
         """,
     )
     
+    subparsers = parser.add_subparsers(dest="command")
+    
+    # ─────────────────────────────────────────
+    # Workspace subcommand
+    # ─────────────────────────────────────────
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Multi-repository workspace commands"
+    )
+    workspace_parser.add_argument(
+        "--workspace", "-w",
+        help="Path to ccc-workspace.yml file"
+    )
+    
+    workspace_subparsers = workspace_parser.add_subparsers(dest="workspace_command")
+    
+    # workspace list
+    workspace_subparsers.add_parser("list", help="List all services in workspace")
+    
+    # workspace query
+    query_parser = workspace_subparsers.add_parser("query", help="Query services")
+    query_parser.add_argument("--tags", "-t", nargs="+", help="Filter by tags")
+    query_parser.add_argument("--service", "-s", help="Query specific service")
+    query_parser.add_argument(
+        "--what",
+        choices=["info", "depends-on", "dependents", "external", "all"],
+        default="all",
+        help="What information to show"
+    )
+    query_parser.add_argument(
+        "--generate", "-g",
+        action="store_true",
+        help="Generate workspace context for matched services"
+    )
+    
+    # workspace validate
+    workspace_subparsers.add_parser("validate", help="Validate workspace configuration")
+    
+    # workspace generate
+    gen_parser = workspace_subparsers.add_parser("generate", help="Generate workspace context")
+    gen_parser.add_argument("--tags", "-t", nargs="+", help="Filter services by tags")
+    
+    # ─────────────────────────────────────────
+    # Single-repo arguments (default command)
+    # ─────────────────────────────────────────
     parser.add_argument(
         "path",
         nargs="?",
         default=".",
-        help="Path to project root (default: current directory)",
+        help="Path to project root (default: current directory)"
     )
     parser.add_argument(
         "--quick-update", "-q",
         action="store_true",
-        help="Fast incremental update",
+        help="Fast incremental update"
     )
     parser.add_argument(
         "--force", "-f",
         action="store_true",
-        help="Force full regeneration",
+        help="Force full regeneration"
     )
     parser.add_argument(
         "--watch", "-w",
         action="store_true",
-        help="Watch for file changes and auto-update",
+        help="Watch for file changes and auto-update"
     )
     parser.add_argument(
         "--with-summaries",
         action="store_true",
-        help="Generate LLM-powered module summaries",
+        help="Generate LLM-powered module summaries"
     )
     parser.add_argument(
         "--doctor",
         action="store_true",
-        help="Run diagnostics",
+        help="Run diagnostics"
     )
     parser.add_argument(
         "--security-status",
         action="store_true",
-        help="Show security configuration",
+        help="Show security configuration"
     )
     parser.add_argument(
         "--output", "-o",
-        help="Output directory",
+        help="Output directory"
     )
     parser.add_argument(
         "--config", "-c",
-        help="Path to config file",
+        help="Path to config file"
     )
     parser.add_argument(
         "--version", "-v",
         action="version",
-        version=f"llm-context-setup {VERSION}",
+        version=f"llm-context-setup {VERSION}"
     )
     
     args = parser.parse_args()
+    
+    # ─────────────────────────────────────────
+    # Handle workspace command
+    # ─────────────────────────────────────────
+    if args.command == "workspace":
+        sys.exit(workspace_command(args))
+    
+    # ─────────────────────────────────────────
+    # Handle single-repo commands
+    # ─────────────────────────────────────────
     root = Path(args.path).resolve()
     
     if args.doctor:
@@ -4187,7 +4934,7 @@ Examples:
                 else:
                     config = get_default_config()
             except ImportError:
-                print("YAML config requires: pip install pyyaml")
+                print("  YAML config requires: pip install pyyaml")
                 sys.exit(1)
         else:
             content = safe_read_text(config_path)
