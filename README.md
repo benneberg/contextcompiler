@@ -334,7 +334,18 @@ You should see:
 - Dependencies detected
 - Tags auto-assigned
 
+### Commands available:
+#### Single repo
+python llm-context-setup.py
+python llm-context-setup.py --quick-update
+python llm-context-setup.py --doctor
 
+#### Workspace (multi-repo)
+python llm-context-setup.py workspace list
+python llm-context-setup.py workspace query --tags platforms
+python llm-context-setup.py workspace query --service auth-service --what all
+python llm-context-setup.py workspace validate
+python llm-context-setup.py workspace generate
 
 
 Roadmap
