@@ -1,5 +1,18 @@
 # Testing Guide
 
+***In short***
+# 1. Install test dependencies
+pip install -r tests/requirements.txt
+
+# 2. Run the tests
+python tests/run_tests.py --verbose
+
+# 3. Check that all tests pass
+# You should see output like:
+# tests/integration/test_current_functionality.py::TestPythonFastAPI::test_generates_context_directory PASSED
+# tests/integration/test_current_functionality.py::TestPythonFastAPI::test_generates_tree_file PASSED
+# ...
+
 ## Running Tests
 
 ### Install test dependencies
