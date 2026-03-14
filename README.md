@@ -1,4 +1,4 @@
-# CCC — Context Compiler
+# CCC — Code Context Compiler
 
 **Generate structured, LLM-optimized project knowledge from codebases and workspaces.**
 
