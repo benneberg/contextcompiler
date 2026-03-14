@@ -1,1 +1,36 @@
+# ccc-workspace.yml - Multi-repo workspace configuration
+name: example-platform
+version: 1
 
+services:
+  auth-service:
+    path: ./auth-service
+    type: backend-api
+    tags:
+      - auth
+      - security
+      - core
+    description: "Authentication and authorization service"
+
+  user-service:
+    path: ./user-service
+    type: backend-api
+    tags:
+      - users
+      - profiles
+      - core
+    depends_on:
+      - auth-service
+    description: "User management service"
+
+  api-gateway:
+    path: ./api-gateway
+    type: backend-api
+    tags:
+      - gateway
+      - routing
+      - core
+    depends_on:
+      - auth-service
+      - user-service
+    description: "API Gateway and routing layer"
