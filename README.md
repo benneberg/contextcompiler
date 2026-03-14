@@ -306,6 +306,15 @@ The tool automatically detects and documents:
   "tags": ["backend-api", "users", "python"]
 }
 ```
+This file is the foundation for multi-repo mode, enabling workspace queries like:
+```
+# Find all services tagged "users"
+ccc workspace query --tags users
+
+# See what depends on auth-service
+ccc workspace query --service auth-service --what depends-on-me
+```
+
 ⸻
 
 Roadmap
