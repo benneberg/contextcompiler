@@ -2918,29 +2918,334 @@ class ExternalDependencyDetector:
                     if service not in deps["depends_on"]["external_apis"]:
                         deps["depends_on"]["external_apis"].append(service)
     
+ExternalDependencyDetector with this enhanced version:
+
+Python
+
     def _detect_js_dependencies(self, deps: dict) -> None:
-        """Detect JavaScript/TypeScript external dependencies."""
+        """
+        Detect JavaScript/TypeScript external dependencies.
+        
+        Enhanced with comprehensive patterns for:
+        - fetch, axios, got, node-fetch, ky
+        - Next.js API routes and server actions
+        - NestJS controllers, services, event handlers
+        - tRPC routers and procedures
+        - GraphQL clients (Apollo, urql)
+        - Database ORMs (Prisma, TypeORM, Drizzle, Mongoose)
+        - Message queues (Kafka, RabbitMQ, Bull, BullMQ)
+        - WebSocket connections
+        - Third-party SDK patterns
+        """
+        
+        # ─────────────────────────────────────────
+        # HTTP Client Patterns
+        # ─────────────────────────────────────────
         
         http_patterns = [
-            (r'fetch\s*\(\s*["`\']([^"`\']+)', "fetch"),
-            (r'axios\.(get|post|put|delete|patch)\s*\(\s*["`\']([^"`\']+)', "axios"),
-            (r'http\.(get|post|put|delete)\s*\(\s*["`\']([^"`\']+)', "http"),
+            # fetch API (multiple variations)
+            (r'fetch\s*\(\s*[`"\']([^`"\']+)[`"\']', "fetch"),
+            (r'fetch\s*\(\s*`([^`]+)`', "fetch-template"),
+            (r'fetch\s*\(\s*([A-Z_]+)\s*[,\)]', "fetch-env"),
+            
+            # axios (all methods)
+            (r'axios\s*\.\s*(get|post|put|delete|patch|head|options)\s*\(\s*[`"\']([^`"\']+)', "axios"),
+            (r'axios\s*\(\s*\{[^}]*url\s*:\s*[`"\']([^`"\']+)', "axios-config"),
+            (r'axios\.create\s*\(\s*\{[^}]*baseURL\s*:\s*[`"\']([^`"\']+)', "axios-instance"),
+            
+            # got (Node.js HTTP client)
+            (r'got\s*\.\s*(get|post|put|delete|patch)\s*\(\s*[`"\']([^`"\']+)', "got"),
+            (r'got\s*\(\s*[`"\']([^`"\']+)', "got"),
+            
+            # ky (modern fetch wrapper)
+            (r'ky\s*\.\s*(get|post|put|delete|patch)\s*\(\s*[`"\']([^`"\']+)', "ky"),
+            
+            # node-fetch
+            (r'import.*from\s*["\']node-fetch["\']', "node-fetch-import"),
+            
+            # superagent
+            (r'superagent\s*\.\s*(get|post|put|delete|patch)\s*\(\s*[`"\']([^`"\']+)', "superagent"),
+            
+            # request (deprecated but still used)
+            (r'request\s*\(\s*[`"\']([^`"\']+)', "request"),
+            
+            # undici (Node.js)
+            (r'undici\s*\.\s*(request|fetch)\s*\(\s*[`"\']([^`"\']+)', "undici"),
         ]
+        
+        # ─────────────────────────────────────────
+        # Next.js Patterns
+        # ─────────────────────────────────────────
+        
+        nextjs_patterns = [
+            # API routes (pages/api and app/api)
+            (r'export\s+(?:async\s+)?function\s+(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s*\(', "nextjs-route-handler"),
+            (r'export\s+default\s+(?:async\s+)?function\s+handler\s*\(', "nextjs-api-route"),
+            
+            # Server actions
+            (r'["\']use server["\']', "nextjs-server-action"),
+            
+            # getServerSideProps, getStaticProps
+            (r'export\s+(?:async\s+)?function\s+getServerSideProps', "nextjs-gsp"),
+            (r'export\s+(?:async\s+)?function\s+getStaticProps', "nextjs-gssp"),
+            
+            # Next.js fetch extensions
+            (r'fetch\s*\([^)]*,\s*\{[^}]*next\s*:', "nextjs-fetch"),
+            (r'revalidatePath|revalidateTag', "nextjs-revalidate"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # NestJS Patterns
+        # ─────────────────────────────────────────
+        
+        nestjs_patterns = [
+            # Controllers and routes
+            (r'@Controller\s*\(\s*[`"\']([^`"\']*)[`"\']?\s*\)', "nestjs-controller"),
+            (r'@(Get|Post|Put|Delete|Patch|Head|Options|All)\s*\(\s*[`"\']?([^`"\')\s]*)', "nestjs-route"),
+            
+            # Injectable services
+            (r'@Injectable\s*\(\s*\)', "nestjs-service"),
+            
+            # Event patterns
+            (r'@EventPattern\s*\(\s*[`"\']([^`"\']+)', "nestjs-event-pattern"),
+            (r'@MessagePattern\s*\(\s*[`"\']([^`"\']+)', "nestjs-message-pattern"),
+            
+            # Microservices
+            (r'@Client\s*\(\s*\{', "nestjs-client"),
+            (r'ClientProxy', "nestjs-client-proxy"),
+            (r'@GrpcMethod\s*\(\s*[`"\']([^`"\']+)', "nestjs-grpc"),
+            
+            # WebSocket
+            (r'@WebSocketGateway', "nestjs-websocket"),
+            (r'@SubscribeMessage\s*\(\s*[`"\']([^`"\']+)', "nestjs-ws-message"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # tRPC Patterns
+        # ─────────────────────────────────────────
+        
+        trpc_patterns = [
+            (r'\.query\s*\(\s*[`"\']([^`"\']+)', "trpc-query"),
+            (r'\.mutation\s*\(\s*[`"\']([^`"\']+)', "trpc-mutation"),
+            (r'\.subscription\s*\(\s*[`"\']([^`"\']+)', "trpc-subscription"),
+            (r'createTRPCRouter|initTRPC', "trpc-router"),
+            (r't\.router\s*\(\s*\{', "trpc-router-v10"),
+            (r'trpc\.createClient', "trpc-client"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # GraphQL Patterns
+        # ─────────────────────────────────────────
+        
+        graphql_patterns = [
+            # Apollo Client
+            (r'useQuery\s*\(\s*([A-Z_]+)', "apollo-usequery"),
+            (r'useMutation\s*\(\s*([A-Z_]+)', "apollo-usemutation"),
+            (r'useLazyQuery\s*\(\s*([A-Z_]+)', "apollo-uselazyquery"),
+            (r'useSubscription\s*\(\s*([A-Z_]+)', "apollo-usesubscription"),
+            (r'ApolloClient\s*\(\s*\{[^}]*uri\s*:\s*[`"\']([^`"\']+)', "apollo-client"),
+            (r'new\s+ApolloClient', "apollo-client-new"),
+            
+            # urql
+            (r'createClient\s*\(\s*\{[^}]*url\s*:\s*[`"\']([^`"\']+)', "urql-client"),
+            
+            # graphql-request
+            (r'new\s+GraphQLClient\s*\(\s*[`"\']([^`"\']+)', "graphql-request"),
+            (r'request\s*\(\s*[`"\']([^`"\']+)[`"\'],\s*[`"\']', "graphql-request-simple"),
+            
+            # gql tag
+            (r'gql`[^`]*(?:query|mutation|subscription)\s+(\w+)', "graphql-operation"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # Database ORM Patterns
+        # ─────────────────────────────────────────
         
         database_patterns = [
-            (r'mongoose\.connect', "MongoDB"),
-            (r'new Pool\(.*postgres', "PostgreSQL"),
-            (r'createClient\(.*redis', "Redis"),
-            (r'@prisma/client', "Database (Prisma)"),
+            # Prisma
+            (r'@prisma/client', "prisma-client"),
+            (r'new\s+PrismaClient', "prisma-instance"),
+            (r'prisma\.\w+\.(findMany|findUnique|findFirst|create|update|delete|upsert)', "prisma-query"),
+            (r'\$queryRaw|\$executeRaw', "prisma-raw"),
+            
+            # TypeORM
+            (r'@Entity\s*\(', "typeorm-entity"),
+            (r'@Column|@PrimaryGeneratedColumn|@ManyToOne|@OneToMany|@ManyToMany', "typeorm-column"),
+            (r'getRepository|createConnection|DataSource', "typeorm-connection"),
+            (r'\.createQueryBuilder\s*\(', "typeorm-querybuilder"),
+            
+            # Drizzle
+            (r'drizzle\s*\(', "drizzle-instance"),
+            (r'import.*from\s*["\']drizzle-orm', "drizzle-import"),
+            (r'pgTable|mysqlTable|sqliteTable', "drizzle-schema"),
+            
+            # Mongoose
+            (r'mongoose\.connect\s*\(\s*[`"\']([^`"\']+)', "mongoose-connect"),
+            (r'new\s+Schema\s*\(|mongoose\.Schema', "mongoose-schema"),
+            (r'mongoose\.model\s*\(', "mongoose-model"),
+            
+            # Kysely
+            (r'import.*from\s*["\']kysely', "kysely-import"),
+            (r'new\s+Kysely', "kysely-instance"),
+            
+            # Sequelize
+            (r'new\s+Sequelize\s*\(', "sequelize-instance"),
+            (r'sequelize\.define', "sequelize-model"),
+            
+            # Knex
+            (r'knex\s*\(\s*[`"\'](\w+)[`"\']', "knex-query"),
+            (r'import.*from\s*["\']knex', "knex-import"),
+            
+            # Raw database drivers
+            (r'pg\.Pool|new\s+Pool\s*\(', "pg-pool"),
+            (r'mysql\.createConnection|mysql2', "mysql-driver"),
+            (r'MongoClient\.connect', "mongodb-native"),
+            (r'import.*from\s*["\']redis["\']|createClient.*redis', "redis-driver"),
+            (r'import.*from\s*["\']ioredis["\']|new\s+Redis\s*\(', "ioredis"),
         ]
         
-        message_queue_patterns = [
-            (r'kafkajs', "Kafka"),
-            (r'amqplib', "RabbitMQ"),
-            (r'bull', "Redis Queue"),
+        # ─────────────────────────────────────────
+        # Message Queue Patterns
+        # ─────────────────────────────────────────
+        
+        mq_patterns = [
+            # Kafka
+            (r'kafkajs|KafkaJS|new\s+Kafka\s*\(', "kafka"),
+            (r'\.producer\s*\(\s*\)|\.consumer\s*\(\s*\{', "kafka-client"),
+            
+            # RabbitMQ / AMQP
+            (r'amqplib|amqp\.connect', "rabbitmq"),
+            
+            # Bull / BullMQ
+            (r'new\s+Queue\s*\(\s*[`"\']([^`"\']+)', "bull-queue"),
+            (r'import.*from\s*["\']bullmq["\']', "bullmq"),
+            (r'@Process\s*\(|@Processor\s*\(', "bull-processor"),
+            
+            # AWS SQS
+            (r'SQSClient|@aws-sdk/client-sqs', "aws-sqs"),
+            (r'\.sendMessage\s*\(|\.receiveMessage\s*\(', "sqs-operation"),
+            
+            # Google Pub/Sub
+            (r'@google-cloud/pubsub|PubSub\s*\(', "gcp-pubsub"),
+            
+            # Azure Service Bus
+            (r'@azure/service-bus|ServiceBusClient', "azure-servicebus"),
         ]
         
-        file_patterns = ["*.ts", "*.tsx", "*.js", "*.jsx"]
+        # ─────────────────────────────────────────
+        # WebSocket Patterns
+        # ─────────────────────────────────────────
+        
+        websocket_patterns = [
+            (r'new\s+WebSocket\s*\(\s*[`"\']([^`"\']+)', "websocket"),
+            (r'socket\.io|io\s*\(\s*[`"\']([^`"\']+)', "socketio"),
+            (r'import.*from\s*["\']ws["\']', "ws-library"),
+            (r'new\s+Server\s*\([^)]*WebSocket', "ws-server"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # Third-Party SDK Patterns
+        # ─────────────────────────────────────────
+        
+        sdk_patterns = [
+            # Payment providers
+            (r'stripe|Stripe\s*\(', "Stripe"),
+            (r'@paypal|paypal\.Buttons', "PayPal"),
+            (r'braintree', "Braintree"),
+            (r'square|Square\s*\(', "Square"),
+            
+            # Auth providers
+            (r'@auth0|Auth0Client|createAuth0Client', "Auth0"),
+            (r'@clerk|ClerkProvider|useClerk', "Clerk"),
+            (r'next-auth|NextAuth|getServerSession', "NextAuth"),
+            (r'@supabase|createClient.*supabase', "Supabase"),
+            (r'firebase|Firebase|initializeApp', "Firebase"),
+            (r'@aws-amplify|Amplify\.configure', "AWS Amplify"),
+            
+            # Communication
+            (r'twilio|Twilio\s*\(', "Twilio"),
+            (r'@sendgrid|sendgrid', "SendGrid"),
+            (r'nodemailer|createTransport', "Nodemailer"),
+            (r'@mailchimp|mailchimp', "Mailchimp"),
+            (r'postmark', "Postmark"),
+            (r'resend|Resend\s*\(', "Resend"),
+            
+            # Cloud storage
+            (r'@aws-sdk/client-s3|S3Client', "AWS S3"),
+            (r'@google-cloud/storage', "GCP Storage"),
+            (r'@azure/storage-blob', "Azure Blob"),
+            (r'cloudinary', "Cloudinary"),
+            (r'uploadthing', "UploadThing"),
+            
+            # Analytics & Monitoring
+            (r'@sentry|Sentry\.init', "Sentry"),
+            (r'@segment|Analytics\s*\(', "Segment"),
+            (r'mixpanel', "Mixpanel"),
+            (r'@datadog|datadogRum', "Datadog"),
+            (r'posthog|PostHog', "PostHog"),
+            (r'@vercel/analytics', "Vercel Analytics"),
+            
+            # Search
+            (r'algolia|algoliasearch', "Algolia"),
+            (r'@elastic/elasticsearch|ElasticSearch', "Elasticsearch"),
+            (r'meilisearch', "Meilisearch"),
+            (r'typesense', "Typesense"),
+            
+            # CMS
+            (r'@sanity|createClient.*sanity', "Sanity"),
+            (r'contentful', "Contentful"),
+            (r'@strapi', "Strapi"),
+            (r'@prismic', "Prismic"),
+            
+            # AI/ML
+            (r'openai|OpenAI\s*\(', "OpenAI"),
+            (r'@anthropic|Anthropic\s*\(', "Anthropic"),
+            (r'@huggingface|HfInference', "Hugging Face"),
+            (r'replicate', "Replicate"),
+            (r'@langchain', "LangChain"),
+            (r'@vercel/ai|useChat|useCompletion', "Vercel AI"),
+            
+            # Feature flags
+            (r'@vercel/flags|flags\s*\(', "Vercel Flags"),
+            (r'launchdarkly|LDClient', "LaunchDarkly"),
+            (r'flagsmith', "Flagsmith"),
+            (r'@growthbook', "GrowthBook"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # Environment Variable Patterns (service URLs)
+        # ─────────────────────────────────────────
+        
+        env_patterns = [
+            (r'process\.env\.([A-Z][A-Z0-9_]*(?:URL|URI|HOST|ENDPOINT|API|SERVICE)[A-Z0-9_]*)', "env-service-url"),
+            (r'process\.env\.([A-Z][A-Z0-9_]*(?:DATABASE|DB|REDIS|MONGO|POSTGRES|MYSQL)[A-Z0-9_]*)', "env-database"),
+            (r'process\.env\.([A-Z][A-Z0-9_]*(?:QUEUE|KAFKA|RABBIT|SQS|PUBSUB)[A-Z0-9_]*)', "env-queue"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # TypeScript-specific patterns
+        # ─────────────────────────────────────────
+        
+        typescript_type_patterns = [
+            # Exported interfaces and types (for exposes.types)
+            (r'export\s+(?:interface|type)\s+(\w+)', "ts-export-type"),
+            
+            # Zod schemas
+            (r'z\.object\s*\(\s*\{|z\.enum\s*\(|export\s+const\s+(\w+Schema)\s*=\s*z\.', "zod-schema"),
+            
+            # io-ts
+            (r't\.type\s*\(\s*\{|t\.interface\s*\(', "io-ts-type"),
+        ]
+        
+        # ─────────────────────────────────────────
+        # Process Files
+        # ─────────────────────────────────────────
+        
+        file_patterns = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"]
+        
+        exposed_routes = []
+        exposed_events = []
+        exposed_types = []
         
         for pattern in file_patterns:
             for js_file in self.root.rglob(pattern):
@@ -2951,38 +3256,195 @@ class ExternalDependencyDetector:
                 if not content:
                     continue
                 
+                rel_path = str(js_file.relative_to(self.root))
+                
+                # ─────────────────────────────────────────
                 # Detect HTTP calls
-                for http_pattern, lib in http_patterns:
-                    for match in re.finditer(http_pattern, content):
-                        if len(match.groups()) >= 2:
-                            method = match.group(1).upper()
-                            url = match.group(2)
-                        else:
-                            url = match.group(1)
-                            method = "GET"
+                # ─────────────────────────────────────────
+                for http_pattern, pattern_type in http_patterns:
+                    for match in re.finditer(http_pattern, content, re.MULTILINE):
+                        groups = match.groups()
                         
-                        if url.startswith("http") or url.startswith("${"):
+                        if len(groups) >= 2:
+                            method = groups[0].upper() if groups[0] in ["get", "post", "put", "delete", "patch", "head", "options"] else "GET"
+                            url = groups[1]
+                        elif len(groups) == 1:
+                            url = groups[0]
+                            method = "GET"
+                        else:
+                            continue
+                        
+                        # Skip template literals with complex expressions
+                        if "${" in url and "}" in url:
+                            # Try to extract base URL
+                            base_match = re.match(r'^([^$]+)', url)
+                            if base_match:
+                                url = base_match.group(1).rstrip("/")
+                            else:
+                                continue
+                        
+                        # External API call
+                        if url.startswith("http://") or url.startswith("https://"):
                             deps["depends_on"]["apis_consumed"].append(f"{method} {url}")
                             
-                            service_match = re.search(r'https?://([^/:\s]+)', url)
+                            # Extract service/domain
+                            service_match = re.search(r'https?://([^/:]+)', url)
                             if service_match:
                                 service = service_match.group(1)
-                                if service not in ["localhost", "127.0.0.1"]:
+                                if service not in ["localhost", "127.0.0.1", "0.0.0.0"]:
                                     deps["depends_on"]["services"].add(service)
-                        elif url.startswith("/api/"):
-                            deps["exposes"]["api"].append(f"{method} {url}")
+                        
+                        # Internal API route reference
+                        elif url.startswith("/api/") or url.startswith("/v1/") or url.startswith("/v2/"):
+                            exposed_routes.append(f"{method} {url}")
                 
-                # Detect database connections
-                for pattern, db_name in database_patterns:
-                    if re.search(pattern, content):
-                        if db_name not in deps["depends_on"]["databases"]:
+                # ─────────────────────────────────────────
+                # Detect Next.js patterns
+                # ─────────────────────────────────────────
+                for nextjs_pattern, pattern_type in nextjs_patterns:
+                    for match in re.finditer(nextjs_pattern, content):
+                        if pattern_type == "nextjs-route-handler":
+                            method = match.group(1)
+                            # Infer route from file path
+                            route = self._infer_nextjs_route(js_file)
+                            if route:
+                                exposed_routes.append(f"{method} {route}")
+                        elif pattern_type == "nextjs-api-route":
+                            route = self._infer_nextjs_route(js_file)
+                            if route:
+                                exposed_routes.append(f"* {route}")
+                
+                # ─────────────────────────────────────────
+                # Detect NestJS patterns
+                # ─────────────────────────────────────────
+                current_controller_path = ""
+                for nestjs_pattern, pattern_type in nestjs_patterns:
+                    for match in re.finditer(nestjs_pattern, content):
+                        if pattern_type == "nestjs-controller":
+                            current_controller_path = match.group(1) if match.group(1) else ""
+                        elif pattern_type == "nestjs-route":
+                            method = match.group(1).upper()
+                            route_path = match.group(2) if len(match.groups()) > 1 else ""
+                            full_route = f"/{current_controller_path}/{route_path}".replace("//", "/").rstrip("/")
+                            exposed_routes.append(f"{method} {full_route}")
+                        elif pattern_type in ["nestjs-event-pattern", "nestjs-message-pattern"]:
+                            event_name = match.group(1)
+                            exposed_events.append(event_name)
+                        elif pattern_type == "nestjs-ws-message":
+                            event_name = match.group(1)
+                            exposed_events.append(f"ws:{event_name}")
+                
+                # ─────────────────────────────────────────
+                # Detect tRPC patterns
+                # ─────────────────────────────────────────
+                for trpc_pattern, pattern_type in trpc_patterns:
+                    for match in re.finditer(trpc_pattern, content):
+                        if pattern_type in ["trpc-query", "trpc-mutation", "trpc-subscription"]:
+                            procedure_name = match.group(1)
+                            exposed_routes.append(f"tRPC:{pattern_type.split('-')[1]}:{procedure_name}")
+                        elif "router" in pattern_type:
+                            if "trpc" not in [t.lower() for t in deps["tags"]]:
+                                deps["tags"].append("trpc")
+                
+                # ─────────────────────────────────────────
+                # Detect GraphQL patterns
+                # ─────────────────────────────────────────
+                for gql_pattern, pattern_type in graphql_patterns:
+                    for match in re.finditer(gql_pattern, content):
+                        if pattern_type == "apollo-client" or pattern_type == "urql-client":
+                            url = match.group(1)
+                            deps["depends_on"]["apis_consumed"].append(f"GraphQL {url}")
+                            
+                            service_match = re.search(r'https?://([^/:]+)', url)
+                            if service_match:
+                                deps["depends_on"]["services"].add(service_match.group(1))
+                        elif pattern_type == "graphql-operation":
+                            operation_name = match.group(1)
+                            exposed_routes.append(f"GraphQL:{operation_name}")
+                        
+                        if "graphql" not in [t.lower() for t in deps["tags"]]:
+                            deps["tags"].append("graphql")
+                
+                # ─────────────────────────────────────────
+                # Detect database usage
+                # ─────────────────────────────────────────
+                for db_pattern, pattern_type in database_patterns:
+                    if re.search(db_pattern, content, re.IGNORECASE):
+                        db_name = self._get_db_name_from_pattern(pattern_type)
+                        if db_name and db_name not in deps["depends_on"]["databases"]:
                             deps["depends_on"]["databases"].append(db_name)
                 
+                # ─────────────────────────────────────────
                 # Detect message queues
-                for pattern, mq_name in message_queue_patterns:
-                    if re.search(pattern, content):
-                        if mq_name not in deps["depends_on"]["message_queues"]:
+                # ─────────────────────────────────────────
+                for mq_pattern, pattern_type in mq_patterns:
+                    for match in re.finditer(mq_pattern, content):
+                        mq_name = self._get_mq_name_from_pattern(pattern_type)
+                        if mq_name and mq_name not in deps["depends_on"]["message_queues"]:
                             deps["depends_on"]["message_queues"].append(mq_name)
+                        
+                        # Extract queue names
+                        if pattern_type == "bull-queue":
+                            queue_name = match.group(1)
+                            exposed_events.append(f"queue:{queue_name}")
+                
+                # ─────────────────────────────────────────
+                # Detect WebSocket usage
+                # ─────────────────────────────────────────
+                for ws_pattern, pattern_type in websocket_patterns:
+                    for match in re.finditer(ws_pattern, content):
+                        if "WebSocket" not in deps["depends_on"]["message_queues"]:
+                            deps["depends_on"]["message_queues"].append("WebSocket")
+                        
+                        if len(match.groups()) > 0:
+                            ws_url = match.group(1)
+                            if ws_url.startswith("ws://") or ws_url.startswith("wss://"):
+                                deps["depends_on"]["apis_consumed"].append(f"WS {ws_url}")
+                        
+                        if "realtime" not in deps["tags"]:
+                            deps["tags"].append("realtime")
+                
+                # ─────────────────────────────────────────
+                # Detect third-party SDKs
+                # ─────────────────────────────────────────
+                for sdk_pattern, sdk_name in sdk_patterns:
+                    if re.search(sdk_pattern, content, re.IGNORECASE):
+                        if sdk_name not in deps["depends_on"]["external_apis"]:
+                            deps["depends_on"]["external_apis"].append(sdk_name)
+                
+                # ─────────────────────────────────────────
+                # Detect environment variable service references
+                # ─────────────────────────────────────────
+                for env_pattern, pattern_type in env_patterns:
+                    for match in re.finditer(env_pattern, content):
+                        env_var = match.group(1)
+                        if pattern_type == "env-service-url":
+                            deps["depends_on"]["services"].add(f"${{{env_var}}}")
+                        elif pattern_type == "env-database":
+                            if env_var not in str(deps["depends_on"]["databases"]):
+                                deps["depends_on"]["databases"].append(f"${{{env_var}}}")
+                
+                # ─────────────────────────────────────────
+                # Detect exported types
+                # ─────────────────────────────────────────
+                for type_pattern, pattern_type in typescript_type_patterns:
+                    for match in re.finditer(type_pattern, content):
+                        if pattern_type == "ts-export-type" and len(match.groups()) > 0:
+                            type_name = match.group(1)
+                            # Filter common types
+                            if type_name not in ["Props", "State", "Context", "Config", "Options"]:
+                                exposed_types.append(type_name)
+                        elif pattern_type == "zod-schema" and len(match.groups()) > 0:
+                            schema_name = match.group(1)
+                            if schema_name:
+                                exposed_types.append(schema_name)
+        
+        # ─────────────────────────────────────────
+        # Update dependencies
+        # ─────────────────────────────────────────
+        deps["exposes"]["api"].extend(exposed_routes)
+        deps["exposes"]["events"].extend(exposed_events)
+        deps["exposes"]["types"].extend(exposed_types)
     
     def _detect_rust_dependencies(self, deps: dict) -> None:
         """Detect Rust external dependencies."""
@@ -3037,6 +3499,76 @@ class ExternalDependencyDetector:
         # Detect gRPC
         if "google.golang.org/grpc" in content:
             deps["depends_on"]["services"].add("grpc")
+
+    def _infer_nextjs_route(self, filepath: Path) -> Optional[str]:
+        """Infer Next.js API route from file path."""
+        path_str = str(filepath)
+        
+        # App Router: app/api/*/route.ts -> /api/*
+        if "/app/api/" in path_str and "route." in filepath.name:
+            match = re.search(r'/app(/api/[^/]+(?:/[^/]+)*)/route\.\w+$', path_str)
+            if match:
+                route = match.group(1)
+                # Convert [param] to {param}
+                route = re.sub(r'\[(\w+)\]', r'{\1}', route)
+                return route
+        
+        # Pages Router: pages/api/*.ts -> /api/*
+        if "/pages/api/" in path_str:
+            match = re.search(r'/pages(/api/[^.]+)\.\w+$', path_str)
+            if match:
+                route = match.group(1)
+                route = re.sub(r'\[(\w+)\]', r'{\1}', route)
+                return route
+        
+        return None
+    
+    def _get_db_name_from_pattern(self, pattern_type: str) -> Optional[str]:
+        """Get database name from pattern type."""
+        mapping = {
+            "prisma-client": "Database (Prisma)",
+            "prisma-instance": "Database (Prisma)",
+            "prisma-query": "Database (Prisma)",
+            "prisma-raw": "Database (Prisma)",
+            "typeorm-entity": "Database (TypeORM)",
+            "typeorm-column": "Database (TypeORM)",
+            "typeorm-connection": "Database (TypeORM)",
+            "typeorm-querybuilder": "Database (TypeORM)",
+            "drizzle-instance": "Database (Drizzle)",
+            "drizzle-import": "Database (Drizzle)",
+            "drizzle-schema": "Database (Drizzle)",
+            "mongoose-connect": "MongoDB",
+            "mongoose-schema": "MongoDB",
+            "mongoose-model": "MongoDB",
+            "kysely-import": "Database (Kysely)",
+            "kysely-instance": "Database (Kysely)",
+            "sequelize-instance": "Database (Sequelize)",
+            "sequelize-model": "Database (Sequelize)",
+            "knex-query": "Database (Knex)",
+            "knex-import": "Database (Knex)",
+            "pg-pool": "PostgreSQL",
+            "mysql-driver": "MySQL",
+            "mongodb-native": "MongoDB",
+            "redis-driver": "Redis",
+            "ioredis": "Redis",
+        }
+        return mapping.get(pattern_type)
+    
+    def _get_mq_name_from_pattern(self, pattern_type: str) -> Optional[str]:
+        """Get message queue name from pattern type."""
+        mapping = {
+            "kafka": "Kafka",
+            "kafka-client": "Kafka",
+            "rabbitmq": "RabbitMQ",
+            "bull-queue": "Bull/Redis Queue",
+            "bullmq": "BullMQ/Redis Queue",
+            "bull-processor": "Bull/Redis Queue",
+            "aws-sqs": "AWS SQS",
+            "sqs-operation": "AWS SQS",
+            "gcp-pubsub": "Google Pub/Sub",
+            "azure-servicebus": "Azure Service Bus",
+        }
+        return mapping.get(pattern_type)
 
 class LLMContextGenerator:
     """Main orchestrator."""
