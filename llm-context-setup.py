@@ -2593,7 +2593,76 @@ class DiagnosticTool:
         
         print("")
 
-
+# Add to current llm-context-setup.py
+class ExternalDependencyDetector:
+    """Detect external service calls and API dependencies."""
+    
+    def __init__(self, root: Path, languages: List[str]):
+        self.root = root
+        self.languages = languages
+    
+    def detect(self) -> dict:
+        """Detect external dependencies from code patterns."""
+        dependencies = {
+            "service": self.root.name,
+            "exposes": {
+                "api": [],
+                "events": [],
+                "types": [],
+            },
+            "depends_on": {
+                "services": [],
+                "apis_consumed": [],
+                "shared_types_from": [],
+            },
+            "tags": [],
+        }
+        
+        if "python" in self.languages:
+            self._detect_python_dependencies(dependencies)
+        if "typescript" in self.languages or "javascript" in self.languages:
+            self._detect_js_dependencies(dependencies)
+        
+        return dependencies
+    
+    def _detect_python_dependencies(self, deps: dict) -> None:
+        """Detect Python external calls."""
+        patterns = {
+            "http_calls": [
+                r"requests\.(get|post|put|delete|patch)\(['\"]([^'\"]+)",
+                r"httpx\.(get|post|put|delete|patch)\(['\"]([^'\"]+)",
+                r"fetch\(['\"]([^'\"]+)",
+            ],
+            "grpc_calls": [
+                r"grpc\.(\w+)",
+            ],
+            "events": [
+                r"@EventPattern\(['\"]([^'\"]+)",
+                r"\.emit\(['\"]([^'\"]+)",
+                r"kafka\.send\(['\"]([^'\"]+)",
+            ],
+        }
+        
+        for py_file in self.root.rglob("*.py"):
+            if should_skip_path(py_file):
+                continue
+            content = safe_read_text(py_file)
+            if not content:
+                continue
+            
+            # Detect external HTTP calls
+            for pattern in patterns["http_calls"]:
+                for match in re.finditer(pattern, content):
+                    url = match.group(2) if len(match.groups()) > 1 else match.group(1)
+                    if url.startswith("http"):  # External call
+                        deps["depends_on"]["apis_consumed"].append(url)
+            
+            # Detect event emissions
+            for pattern in patterns["events"]:
+                for match in re.finditer(pattern, content):
+                    event = match.group(1)
+                    deps["exposes"]["events"].append(event)
+                    
 class LLMContextGenerator:
     """Main orchestrator."""
     
