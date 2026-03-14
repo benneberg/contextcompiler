@@ -347,6 +347,18 @@ python llm-context-setup.py workspace query --service auth-service --what all
 python llm-context-setup.py workspace validate
 python llm-context-setup.py workspace generate
 
+# Detect conflicts
+python llm-context-setup.py workspace conflicts
+
+# With specific tags
+python llm-context-setup.py workspace conflicts --tags core
+
+# Output to specific directory
+python llm-context-setup.py workspace conflicts --output ./reports
+
+# Alias
+python llm-context-setup.py workspace doctor
+
 
 Roadmap
 
