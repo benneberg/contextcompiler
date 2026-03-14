@@ -1,0 +1,7 @@
+# API Routes
+***Generated: 2024-01-15 10:30 UTC***
+main.py
+GET /
+GET /api/users/{user_id}
+POST /api/users
+DELETE /api/users/{user_id}
