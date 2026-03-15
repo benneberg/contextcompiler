@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .generators.claude_md import ClaudeMdEnhancer
 from .config import load_config
 from .file_index import FileIndex, HashCache
 from .manifest import SmartUpdater
