@@ -87,6 +87,11 @@ pip install -e .
 ccc generate
 ```
 
+### Development
+Linux,Mac - install -e . --break-system-packages
+Windows - install -e .
+If missing setuptools on windows: python -m pip install --upgrade pip setuptools wheel
+
 **Requirements:** Python 3.10+. No mandatory dependencies — core generation works with zero installs.
 
 -----
