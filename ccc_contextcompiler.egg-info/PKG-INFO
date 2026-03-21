@@ -1,3 +1,60 @@
+Metadata-Version: 2.4
+Name: ccc-contextcompiler
+Version: 0.1.0
+Summary: Generate structured, LLM-optimized context from codebases and workspaces
+Author: Lukas B
+License: MIT License
+        
+        Copyright (c) 2026 Lukas B
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: Homepage, https://github.com/benneberg/contextcompiler
+Project-URL: Repository, https://github.com/benneberg/contextcompiler
+Project-URL: Issues, https://github.com/benneberg/contextcompiler/issues
+Keywords: llm,context,code-analysis,developer-tools,ai,codebase,workspace,pkml
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Utilities
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Provides-Extra: yaml
+Requires-Dist: pyyaml>=6.0; extra == "yaml"
+Provides-Extra: watch
+Requires-Dist: watchdog>=3.0; extra == "watch"
+Provides-Extra: ai
+Requires-Dist: anthropic>=0.25; extra == "ai"
+Requires-Dist: openai>=1.0; extra == "ai"
+Provides-Extra: all
+Requires-Dist: pyyaml>=6.0; extra == "all"
+Requires-Dist: watchdog>=3.0; extra == "all"
+Requires-Dist: anthropic>=0.25; extra == "all"
+Requires-Dist: openai>=1.0; extra == "all"
+Dynamic: license-file
+
 # CCC — Code Context Compiler
 
 **Turn any codebase into structured, LLM-ready knowledge.**
@@ -154,10 +211,6 @@ ccc --output .context
 |`ARCHITECTURE.md`           |Architecture description scaffold               |
 
 -----
-## New commands
-ccc workspace discover                    # all services
-ccc workspace discover --tags platforms   # filtered
-ccc workspace discover --min-confidence 0.7  # stricter
 
 ## Language Support
 
@@ -513,17 +566,3 @@ MIT — see <LICENSE>.
 **Functional and actively developed.**
 
 Both single-repo and workspace mode work today. The `ccc` package is modular and installable. The standalone `llm-context-setup.py` remains available as a zero-dependency fallback.
-
-
-# Query — interrogate artifacts at runtime
-ccc query "UserService"                    # search everything
-ccc query --type symbol CreateUser         # exact symbol search  
-ccc query --type route /users              # route search
-ccc query --type impact UserService        # what breaks if this changes?
-ccc query --type context "auth flow"       # build LLM-ready context block
-ccc query --format json "platform"         # machine-readable output
-
-# Align — detect drift between code and PKML
-ccc align                                  # auto-detect pkml.json
-ccc align --pkml product-knowledge/pkml.json
-ccc align --format json                    # for CI integration

@@ -1,0 +1,64 @@
+{
+  "workspace": "ccc",
+  "generated": "2026-03-20 14:13 UTC",
+  "version": "1",
+  "services": {
+    "ccc": {
+      "name": "ccc",
+      "type": "library",
+      "tags": [
+        "core"
+      ],
+      "description": "python library",
+      "depends_on": [],
+      "path": "ccc",
+      "has_context": false,
+      "exposes": {
+        "api": [],
+        "events": [],
+        "types": []
+      },
+      "languages": [
+        "python"
+      ],
+      "context_generated": null,
+      "framework": null
+    },
+    "tests": {
+      "name": "tests",
+      "type": "backend-api",
+      "tags": [
+        "auth",
+        "users",
+        "search",
+        "infra"
+      ],
+      "description": "python/typescript backend api",
+      "depends_on": [],
+      "path": "tests",
+      "has_context": false,
+      "exposes": {
+        "api": [],
+        "events": [],
+        "types": []
+      },
+      "languages": [
+        "python",
+        "typescript"
+      ],
+      "context_generated": null,
+      "framework": null
+    }
+  },
+  "all_tags": [
+    "auth",
+    "core",
+    "infra",
+    "search",
+    "users"
+  ],
+  "all_services": [
+    "ccc",
+    "tests"
+  ]
+}

@@ -1,0 +1,16 @@
+
+[ai]
+anthropic>=0.25
+openai>=1.0
+
+[all]
+pyyaml>=6.0
+watchdog>=3.0
+anthropic>=0.25
+openai>=1.0
+
+[watch]
+watchdog>=3.0
+
+[yaml]
+pyyaml>=6.0

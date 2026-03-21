@@ -1,0 +1,116 @@
+{
+  "$schema": "https://pkml.dev/schema/v0.1.json",
+  "meta": {
+    "version": "1.0.0",
+    "pkml_version": "0.1.0",
+    "last_updated": "2026-03-20T12:47:00.238471+00:00",
+    "created_at": "2026-03-20T12:47:00.238471+00:00",
+    "generated_by": "ccc",
+    "generated_from": "C:\\Users\\LukasBenneberg\\Lukas\\Privat\\ccc"
+  },
+  "product": {
+    "name": "Ccc",
+    "tagline": "TODO: one-sentence description of Ccc",
+    "description": "TODO: 2-3 sentence description of Ccc",
+    "category": [
+      "backend-api",
+      "python",
+      "typescript"
+    ],
+    "repository": "https://github.com/benneberg/contextcompiler.git",
+    "api_base": "TODO: your API base URL"
+  },
+  "features": [
+    {
+      "id": "feat_root",
+      "name": "Root API",
+      "description": "Exposes 2 endpoint(s): GET",
+      "user_benefit": "Allows clients to manage root resources",
+      "priority": "primary",
+      "evidence": {
+        "api_routes": [
+          "GET /",
+          "GET /"
+        ]
+      }
+    },
+    {
+      "id": "feat_api",
+      "name": "Api API",
+      "description": "Exposes 18 endpoint(s): DELETE, GET, PATCH, POST",
+      "user_benefit": "Allows clients to manage api resources",
+      "priority": "primary",
+      "evidence": {
+        "api_routes": [
+          "GET /api/users/{user_id}",
+          "POST /api/users",
+          "DELETE /api/users/{user_id}",
+          "POST /api/events/track",
+          "GET /api/health"
+        ]
+      }
+    }
+  ],
+  "tech_stack": {},
+  "workflows": [
+    {
+      "id": "workflow_getting_started",
+      "name": "Getting Started",
+      "description": "Basic workflow showing how to use Ccc",
+      "difficulty": "beginner",
+      "estimated_time": "5 minutes",
+      "steps": [
+        {
+          "order": 1,
+          "action": "Make a GET request to /",
+          "expected_outcome": "Successful response"
+        }
+      ],
+      "outcome": "You have successfully interacted with Ccc"
+    }
+  ],
+  "integrations": [
+    {
+      "id": "int_aws",
+      "name": "AWS",
+      "category": "external-api",
+      "description": "TODO: describe AWS integration",
+      "required": false
+    },
+    {
+      "id": "int_azure",
+      "name": "Azure",
+      "category": "external-api",
+      "description": "TODO: describe Azure integration",
+      "required": false
+    },
+    {
+      "id": "int_google_cloud",
+      "name": "Google Cloud",
+      "category": "external-api",
+      "description": "TODO: describe Google Cloud integration",
+      "required": false
+    },
+    {
+      "id": "int_sendgrid",
+      "name": "SendGrid",
+      "category": "external-api",
+      "description": "TODO: describe SendGrid integration",
+      "required": false
+    },
+    {
+      "id": "int_stripe",
+      "name": "Stripe",
+      "category": "external-api",
+      "description": "TODO: describe Stripe integration",
+      "required": false
+    },
+    {
+      "id": "int_twilio",
+      "name": "Twilio",
+      "category": "external-api",
+      "description": "TODO: describe Twilio integration",
+      "required": false
+    }
+  ]
+}

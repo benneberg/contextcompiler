@@ -1,0 +1,36 @@
+#!/bin/bash
+# .git/hooks/post-commit
+#
+# Auto-updates CCC context files after commits that touch source code.
+# Install: copy this file to .git/hooks/post-commit and make executable
+#   chmod +x .git/hooks/post-commit
+#
+# Requires CCC to be installed: pip install ccc-contextcompiler
+# Or run from the repo with: python3 /path/to/llm-context-setup.py
+
+# Only run if source files changed in this commit
+if git diff HEAD~1 --name-only 2>/dev/null | grep -qE "\.(py|ts|js|tsx|jsx|go|rs|cs|java)$"; then
+  echo ""
+  echo "  CCC: source files changed, updating context..."
+  
+  # Use installed ccc if available, fall back to local script
+  if command -v ccc &> /dev/null; then
+    ccc --quick-update
+  elif [ -f "llm-context-setup.py" ]; then
+    python3 llm-context-setup.py --quick-update
+  else
+    echo "  CCC: not found, skipping context update"
+    echo "  Install with: pip install ccc-contextcompiler"
+    exit 0
+  fi
+
+  # Stage updated context files if any changed
+  if git diff --quiet .llm-context/ LLM.md ARCHITECTURE.md 2>/dev/null; then
+    echo "  CCC: context already up to date"
+  else
+    echo "  CCC: context updated"
+    # Uncomment to auto-commit context updates:
+    # git add .llm-context/ LLM.md ARCHITECTURE.md 2>/dev/null
+    # git commit -m "chore: update CCC context [skip ci]" --no-verify
+  fi
+fi
