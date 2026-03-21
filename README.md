@@ -14,7 +14,7 @@ ccc align                  # check code matches product documentation
 ccc workspace serve        # open browser UI for the whole team
 ```
 
------
+---
 
 ## The Core Idea
 
@@ -40,7 +40,7 @@ Code → CCC (IR) → .llm-context/ artifacts
 **PKML = Intent** (what should exist, declared by humans)  
 The Alignment Engine combines them — never merge the two sources.
 
------
+---
 
 ## Why It Exists
 
@@ -55,26 +55,26 @@ directly. The most valuable engineering knowledge is rarely in the code itself:
 
 CCC makes that knowledge **extractable, structured, portable, and reusable**.
 
------
+---
 
 ## What Makes This Different
 
-|                             |CCC|Repomix|Cursor indexing|Manual copying|
-|-----------------------------|---|-------|---------------|--------------|
-|**Extracts semantic context**|✓  |✗      |Partial        |✗             |
-|**Symbol → file:line index** |✓  |✗      |✓              |✗             |
-|**Convention detection**     |✓  |✗      |✗              |✗             |
-|**Cross-repo analysis**      |✓  |✗      |✗              |✗             |
-|**Undeclared dep discovery** |✓  |✗      |✗              |✗             |
-|**Intent vs reality check**  |✓  |✗      |✗              |✗             |
-|**Offline / corporate safe** |✓  |✓      |✗              |✓             |
-|**CI-ready, incremental**    |✓  |✗      |✗              |✗             |
-|**Zero required deps**       |✓  |✗      |✗              |✓             |
+| | CCC | Repomix | Cursor indexing | Manual copying |
+|---|---|---|---|---|
+| **Extracts semantic context** | ✓ | ✗ | Partial | ✗ |
+| **Symbol → file:line index** | ✓ | ✗ | ✓ | ✗ |
+| **Convention detection** | ✓ | ✗ | ✗ | ✗ |
+| **Cross-repo analysis** | ✓ | ✗ | ✗ | ✗ |
+| **Undeclared dep discovery** | ✓ | ✗ | ✗ | ✗ |
+| **Intent vs reality check** | ✓ | ✗ | ✗ | ✗ |
+| **Offline / corporate safe** | ✓ | ✓ | ✗ | ✓ |
+| **CI-ready, incremental** | ✓ | ✗ | ✗ | ✗ |
+| **Zero required deps** | ✓ | ✗ | ✗ | ✓ |
 
 **vs Repomix:** Repomix concatenates files. CCC extracts *semantic* context (types,
 routes, dependencies, conventions) and keeps it queryable and incrementally updated.
 
------
+---
 
 ## Installation
 
@@ -103,7 +103,6 @@ pip install -e . --break-system-packages   # if pip complains on Linux
 ```
 
 On Windows, if you get a setuptools error:
-
 ```bash
 python -m pip install --upgrade pip setuptools wheel
 pip install -e .
@@ -118,7 +117,7 @@ python3 llm-context-setup.py
 
 **Requirements:** Python 3.10+. Core generation has zero mandatory dependencies.
 
------
+---
 
 ## Quick Start
 
@@ -153,7 +152,7 @@ your-project/
 └── ARCHITECTURE.md                  architecture description scaffold
 ```
 
------
+---
 
 ## All Commands
 
@@ -172,7 +171,7 @@ ccc --config FILE   / -c FILE Use a custom llm-context.yml or .json config
 ccc --version       / -v      Print version
 ```
 
------
+---
 
 ### `ccc query` — Interrogate Artifacts at Runtime
 
@@ -241,12 +240,11 @@ print(engine.stats())
 ```
 
 Install `networkx` for graph-aware transitive impact analysis:
-
 ```bash
 pip install networkx
 ```
 
------
+---
 
 ### `ccc align` — Detect Drift Between Code and Documentation
 
@@ -287,13 +285,12 @@ ccc align --context-dir DIR            Point at a non-default .llm-context/
 ```
 
 **In CI (exit code 1 on errors):**
-
 ```yaml
 - name: Verify code matches documentation
   run: ccc --force && ccc align
 ```
 
------
+---
 
 ### `ccc pkml` — Bootstrap Product Knowledge
 
@@ -306,7 +303,7 @@ ccc pkml --output DIR          Custom output directory
 ccc pkml --open                Open PKML editor in browser after generating
 ```
 
------
+---
 
 ### `ccc workspace` — Multi-Repository Mode
 
@@ -359,42 +356,42 @@ ccc workspace serve --no-open           Don't auto-open browser
 ccc workspace serve --no-rebuild        Skip rebuilding service-index.json
 ```
 
------
+---
 
 ## Output Files Reference
 
-|File                        |Contents                                             |
-|----------------------------|-----------------------------------------------------|
-|`tree.txt`                  |Annotated directory structure                        |
-|`routes.txt`                |API route map (FastAPI, Flask, Express, NestJS, etc.)|
-|`public-api.txt`            |Exported function signatures with types              |
-|`schemas-extracted.py`      |Python dataclasses, Pydantic models, enums           |
-|`types-extracted.ts`        |TypeScript interfaces, types, enums                  |
-|`dependency-graph.txt`      |Internal import relationships (text)                 |
-|`dependency-graph.md`       |Mermaid dependency diagram                           |
-|`symbol-index.json`         |Symbol → file:line navigation index                  |
-|`external-dependencies.json`|Service boundary contracts (exposes + consumes)      |
-|`env-shape.txt`             |Environment variable shape                           |
-|`db-schema.txt`             |Database models (SQLAlchemy, Django, Prisma, TypeORM)|
-|`entry-points.json`         |Main files, servers, CLI entry points                |
-|`recent-commits.txt`        |Last 20 git commits                                  |
-|`LLM.md`                    |Auto-detected conventions, dangerous files, patterns |
-|`ARCHITECTURE.md`           |Architecture description scaffold                    |
+| File | Contents |
+|------|----------|
+| `tree.txt` | Annotated directory structure |
+| `routes.txt` | API route map (FastAPI, Flask, Express, NestJS, etc.) |
+| `public-api.txt` | Exported function signatures with types |
+| `schemas-extracted.py` | Python dataclasses, Pydantic models, enums |
+| `types-extracted.ts` | TypeScript interfaces, types, enums |
+| `dependency-graph.txt` | Internal import relationships (text) |
+| `dependency-graph.md` | Mermaid dependency diagram |
+| `symbol-index.json` | Symbol → file:line navigation index |
+| `external-dependencies.json` | Service boundary contracts (exposes + consumes) |
+| `env-shape.txt` | Environment variable shape |
+| `db-schema.txt` | Database models (SQLAlchemy, Django, Prisma, TypeORM) |
+| `entry-points.json` | Main files, servers, CLI entry points |
+| `recent-commits.txt` | Last 20 git commits |
+| `LLM.md` | Auto-detected conventions, dangerous files, patterns |
+| `ARCHITECTURE.md` | Architecture description scaffold |
 
------
+---
 
 ## Language Support
 
-|Language  |Schemas|Routes|Signatures|Deps|
-|----------|-------|------|----------|----|
-|Python    |✓      |✓     |✓         |✓   |
-|TypeScript|✓      |✓     |✓         |✓   |
-|JavaScript|—      |✓     |—         |✓   |
-|Rust      |✓      |—     |—         |—   |
-|Go        |✓      |—     |—         |—   |
-|C#        |✓      |—     |—         |—   |
+| Language | Schemas | Routes | Signatures | Deps |
+|----------|---------|--------|------------|------|
+| Python | ✓ | ✓ | ✓ | ✓ |
+| TypeScript | ✓ | ✓ | ✓ | ✓ |
+| JavaScript | — | ✓ | — | ✓ |
+| Rust | ✓ | — | — | — |
+| Go | ✓ | — | — | — |
+| C# | ✓ | — | — | — |
 
------
+---
 
 ## Multi-Repository Workspace — Full Workflow
 
@@ -449,7 +446,6 @@ ccc workspace generate
 ```
 
 Produces `workspace-context/` with:
-
 - `WORKSPACE.md` — what these services do together, how they connect
 - `cross-repo-api.txt` — all API calls between services
 - `change-sequence.md` — correct order to implement changes (from dependency graph)
@@ -465,12 +461,12 @@ ccc workspace discover
 Reads `.llm-context/` artifacts and surfaces hidden coupling nobody put in the manifest.
 Four detection methods:
 
-|Method                |What It Finds                                      |Confidence|
-|----------------------|---------------------------------------------------|----------|
-|API route matching    |Service A calls routes that Service B exposes      |75–95%    |
-|Schema cross-reference|Same type defined differently in two services      |50–85%    |
-|Shared infrastructure |Services sharing the same database, cache, or queue|45–70%    |
-|Event coupling        |Event emitted by one service, consumed by another  |88%       |
+| Method | What It Finds | Confidence |
+|--------|--------------|------------|
+| API route matching | Service A calls routes that Service B exposes | 75–95% |
+| Schema cross-reference | Same type defined differently in two services | 50–85% |
+| Shared infrastructure | Services sharing the same database, cache, or queue | 45–70% |
+| Event coupling | Event emitted by one service, consumed by another | 88% |
 
 Output: `workspace-context/discovered-relationships.md` and `.json`
 
@@ -481,14 +477,13 @@ ccc workspace serve    # opens http://localhost:7842
 ```
 
 Works for the whole team — no coding required. Features:
-
 - Tag-based service filtering
 - Service detail view with API endpoints, dependencies, types
 - Dependency graph with declared vs discovered relationships
 - Suggested change sequence for any task
 - Copy-as-Markdown (for LLM prompts) and Download-as-JSON
 
------
+---
 
 ## Daily Developer Workflow
 
@@ -510,7 +505,7 @@ ccc --quick-update       # <2 seconds, only regenerates what changed
 ccc align                # check nothing documented is missing from code
 ```
 
-### Multi-repo task (e.g. “implement tizen-tep platform support”)
+### Multi-repo task (e.g. "implement tizen-tep platform support")
 
 ```bash
 # Discover which repos are involved
@@ -541,7 +536,7 @@ fi
 chmod +x .git/hooks/post-commit
 ```
 
------
+---
 
 ## GitHub Copilot Integration
 
@@ -584,14 +579,14 @@ Never add a route without checking routes.txt first.
 
 ### Using `ccc query` with Copilot Chat
 
-Instead of uploading entire context files, query for what’s relevant:
+Instead of uploading entire context files, query for what's relevant:
 
 ```bash
 ccc query --type context "authentication flow" --format markdown
 # Copy the output, paste into Copilot Chat before your question
 ```
 
------
+---
 
 ## LLM.md — Auto-Detected Conventions
 
@@ -633,19 +628,19 @@ See .llm-context/ for auto-extracted context:
 - external-dependencies.json — service boundary contracts
 ```
 
------
+---
 
 ## CCC and PKML
 
 CCC and PKML serve different purposes and should never be merged:
 
-|           |CCC                       |PKML                                  |
-|-----------|--------------------------|--------------------------------------|
-|**Input**  |Source code               |Human-written descriptions            |
-|**Output** |`.llm-context/`           |`pkml.json`                           |
-|**Answers**|*How does this code work?*|*What is this product supposed to do?*|
-|**Updates**|Automated (CI / git hook) |Manual (product team)                 |
-|**Owner**  |Engineering               |Product / Engineering                 |
+| | CCC | PKML |
+|--|-----|------|
+| **Input** | Source code | Human-written descriptions |
+| **Output** | `.llm-context/` | `pkml.json` |
+| **Answers** | *How does this code work?* | *What is this product supposed to do?* |
+| **Updates** | Automated (CI / git hook) | Manual (product team) |
+| **Owner** | Engineering | Product / Engineering |
 
 ```bash
 ccc          # generate .llm-context/ from code
@@ -657,15 +652,15 @@ The Alignment Engine (`ccc align`) is the only place these two sources combine.
 It exits with code 1 when the code diverges from the PKML declaration —
 making it suitable as a CI gate.
 
------
+---
 
 ## Incremental Updates
 
-|Strategy    |Behaviour                               |Used for                                 |
-|------------|----------------------------------------|-----------------------------------------|
-|`always`    |Regenerate every run                    |`tree.txt`, `recent-commits.txt`         |
-|`if-changed`|Only regenerate when source files change|`routes.txt`, `schemas-extracted.*`, etc.|
-|`if-missing`|Generate once, never overwrite          |`LLM.md`, `ARCHITECTURE.md`              |
+| Strategy | Behaviour | Used for |
+|----------|-----------|---------|
+| `always` | Regenerate every run | `tree.txt`, `recent-commits.txt` |
+| `if-changed` | Only regenerate when source files change | `routes.txt`, `schemas-extracted.*`, etc. |
+| `if-missing` | Generate once, never overwrite | `LLM.md`, `ARCHITECTURE.md` |
 
 ```bash
 ccc --quick-update   # respects if-changed (fast, <2s on most repos)
@@ -673,15 +668,15 @@ ccc                  # normal run
 ccc --force          # regenerate everything, ignore cache
 ```
 
------
+---
 
 ## Security Modes
 
-|Mode        |Description                                                                                |
-|------------|-------------------------------------------------------------------------------------------|
-|`offline`   |No external AI calls. All analysis local. **Default.** Safe for corporate/proprietary code.|
-|`private-ai`|Use internal infrastructure (Azure OpenAI, self-hosted models).                            |
-|`public-ai` |Use external providers (Anthropic, OpenAI). Warning shown before sending code.             |
+| Mode | Description |
+|------|-------------|
+| `offline` | No external AI calls. All analysis local. **Default.** Safe for corporate/proprietary code. |
+| `private-ai` | Use internal infrastructure (Azure OpenAI, self-hosted models). |
+| `public-ai` | Use external providers (Anthropic, OpenAI). Warning shown before sending code. |
 
 Secret redaction is automatic in all modes. API keys, passwords, and tokens are masked.
 
@@ -697,7 +692,7 @@ security:
 ccc --security-status    # show current mode and redaction settings
 ```
 
------
+---
 
 ## Configuration
 
@@ -743,7 +738,7 @@ llm_summaries:
   max_modules: 30
 ```
 
------
+---
 
 ## Package Structure
 
@@ -799,7 +794,7 @@ contextcompiler/
     └── fixtures/              python-fastapi, typescript-express, multi-repo
 ```
 
------
+---
 
 ## CI Integration
 
@@ -838,7 +833,7 @@ jobs:
   run: ccc --force && ccc align   # exits 1 on errors, fails the build
 ```
 
------
+---
 
 ## Testing
 
@@ -849,7 +844,7 @@ python tests/run_tests.py --verbose
 
 CI runs on Python 3.10, 3.11, 3.12 via GitHub Actions on every push.
 
------
+---
 
 ## Contributing
 
@@ -860,35 +855,35 @@ Contributions welcome. Especially valuable:
 - Confidence score calibration data for `workspace discover`
 - Real-world output examples from production codebases
 
------
+---
 
 ## License
 
 MIT — see LICENSE.
 
------
+---
 
 ## Status
 
 **Functional and actively developed.**
 
-|Feature                                       |Status                                       |
-|----------------------------------------------|---------------------------------------------|
-|Single-repo generation                        |✅ Stable                                     |
-|Workspace mode (init/query/generate/conflicts)|✅ Stable                                     |
-|Cross-repo discovery (`workspace discover`)   |✅ Working, confidence scores being calibrated|
-|Query engine (`ccc query`)                    |✅ Working, lexical today                     |
-|Alignment engine (`ccc align`)                |✅ Working                                    |
-|Browser UI (`workspace serve`)                |✅ Working                                    |
-|LLM module summaries (`--with-summaries`)     |✅ Working (requires [ai])                    |
-|Graph-aware impact analysis                   |✅ Working (requires `pip install networkx`)  |
-|Semantic/embedding search                     |🔲 Planned (Phase 2)                          |
-|VSCode extension                              |🔲 Planned                                    |
+| Feature | Status |
+|---------|--------|
+| Single-repo generation | ✅ Stable |
+| Workspace mode (init/query/generate/conflicts) | ✅ Stable |
+| Cross-repo discovery (`workspace discover`) | ✅ Working, confidence scores being calibrated |
+| Query engine (`ccc query`) | ✅ Working, lexical today |
+| Alignment engine (`ccc align`) | ✅ Working |
+| Browser UI (`workspace serve`) | ✅ Working |
+| LLM module summaries (`--with-summaries`) | ✅ Working (requires [ai]) |
+| Graph-aware impact analysis | ✅ Working (requires `pip install networkx`) |
+| Semantic/embedding search | 🔲 Planned (Phase 2) |
+| VSCode extension | 🔲 Planned |
 
 The `ccc` package is modular and installable via pip. The standalone
 `llm-context-setup.py` remains available as a zero-dependency fallback for
-environments where pip install isn’t possible.
+environments where pip install isn't possible.
 
------
+---
 
 *Built for developers who like structure and precision when working with LLMs in large codebases.*

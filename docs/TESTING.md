@@ -81,3 +81,22 @@ During refactoring, continuously run tests to ensure nothing breaks.
 ### CI Integration
 Tests run automatically on every commit via GitHub Actions (see .github/workflows/test.yml).
 
+
+### Test commands:  
+```
+The ccc query command lets you interrogate the artifacts programmatically it is a meaningful feature. It's the difference between a generated report and a queryable database.
+Note: Differences between single repo vs multi repo workspace. If you pip install networkx, the traversal becomes fully graph-aware for transitive deps.
+# Query — interrogate artifacts at runtime
+ccc query "UserService"                    # search everything
+ccc query --type symbol CreateUser         # exact symbol search  
+ccc query --type route /users              # route search
+ccc query --type impact UserService        # what breaks if this changes?
+ccc query --type context "auth flow"       # build LLM-ready context block
+ccc query --format json "platform"         # machine-readable output
+
+# Align — detect drift between code and PKML
+ccc align                                  # auto-detect pkml.json
+ccc align --pkml product-knowledge/pkml.json
+ccc align --format json                    # for CI integration
+
+```
