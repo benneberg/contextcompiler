@@ -25,9 +25,8 @@ from .index import build_service_index
 
 def _build_html(index_data: dict) -> str:
     """Build the single-page workspace explorer UI."""
-    index_json = json.dumps(index_data, indent=2)
+    index_json = json.dumps(index_data) 
     workspace_name = index_data.get("workspace", "Workspace")
-
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
