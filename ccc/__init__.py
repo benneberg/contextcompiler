@@ -1,4 +1,7 @@
 """CCC — Code Context Compiler."""
+import importlib.metadata
 
-__version__ = "0.4.0"
-VERSION = __version__
+try:
+    __version__ = importlib.metadata.version("ccc_contextcompiler") # Use your actual package name here
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "0.0.0-dev"
