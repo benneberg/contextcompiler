@@ -42,3 +42,85 @@ python ../../../llm-context-setup.py workspace query --tags core --generate
 cat workspace-context/WORKSPACE.md
 cat workspace-context/change-sequence.md
 cat workspace-context/dependency-graph.md
+
+
+/*
+Step 1 — Add “Intent → tags” tests (highest ROI)
+
+Example:
+
+{
+  "input": "add new platform integration",
+  "expectedTags": ["platforms"]
+}
+
+Step 2 — Add “capability inference tests”
+{
+  "repo": "repo-a",
+  "expectedCapabilities": ["platform-management"]
+}
+
+Step 3 — Add “workspace expansion correctness”
+{
+  "seedTags": ["platforms"],
+  "expectedRepos": ["repo-a", "repo-b", "repo-c"]
+}
+
+Step 4 — Add impact simulation tests
+{
+  "changedApi": "POST /platform",
+  "expectedImpactedRepos": ["repo-b", "repo-c"]
+}
+
+Step 5 — Add drift detection tests
+
+{
+  "astApi": ["POST /platform"],
+  "declaredApi": [],
+  "expectedFix": "missing-declaration"
+}
+
+Core idea
+
+Each test describes a reasoning scenario, not a unit function.
+
+⸻
+
+Suggested format: ccc-test.json
+{
+  "name": "add platform integration",
+  "input": {
+    "intent": "add new platform integration"
+  },
+
+  "expected": {
+    "tags": ["platforms"],
+
+    "repos": ["repo-a", "repo-b", "repo-c"],
+
+    "capabilities": [
+      {
+        "repo": "repo-a",
+        "mustInclude": ["platform-management"]
+      }
+    ],
+
+    "impact": {
+      "changedApi": "POST /platform",
+      "impactedRepos": ["repo-b", "repo-c"]
+    }
+  }
+}
+
+Why this matters
+
+You now test:
+	•	semantic correctness
+	•	structural correctness
+	•	propagation correctness
+	•	system-level reasoning
+
+Not just “function outputs”.
+
+
+*/
