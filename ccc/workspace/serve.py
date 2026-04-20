@@ -728,14 +728,14 @@ function copyQueryMarkdown() {{
   services.forEach(s => {{
     md += `## ${{s.name}}\n`;
     md += `- **Type**: ${{s.type}}\n`;
-    md += `- **Tags**: ${{(s.tags||[]).join(', ')}}\n`;
-    if (s.description) md += `- **Description**: ${{s.description}}\n`;
-    if (s.depends_on?.length) md += `- **Depends on**: ${{s.depends_on.join(', ')}}\n`;
+    md += `- **Tags**: ${{(s.tags||[]).join(', ')}}\n\n`;
+    if (s.description) md += `- **Description**: ${{s.description}}\n\n`;
+    if (s.depends_on?.length) md += `- **Depends on**: ${{s.depends_on.join(', ')}}\n\n`;
     if (s.exposes?.api?.length) {{
-      md += `- **Exposes**:\n`;
-      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '`\n');
+      md += `- **Exposes**:\n\n`;
+      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '\n\n\n');
     }}
-    md += '\n';
+    md += '\n\n';
   }});
   md += `## Change Sequence\n\n`;
   ordered.forEach((n, i) => md += `${{i+1}}. **${{n}}**\n`);

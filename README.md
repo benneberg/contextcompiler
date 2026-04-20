@@ -838,6 +838,9 @@ jobs:
 ## Testing
 
 ```bash
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac/Linux
 pip install -r tests/requirements.txt
 python tests/run_tests.py --verbose
 ```

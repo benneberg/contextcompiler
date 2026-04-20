@@ -36,6 +36,7 @@ def get_default_config():
             "symbol_index": True,
             "entry_points": True,
             "external_dependencies": True,
+            "capabilities": True,
         },
         "llm_summaries": {
             "provider": "anthropic",
@@ -61,6 +62,7 @@ def get_default_config():
             "symbol-index.json": "if-changed",
             "entry-points.json": "if-changed",
             "external-dependencies.json": "if-changed",
+            "capabilities.json": "if-missing",
             "modules/*.md": "if-changed",
             "../CLAUDE.md": "if-missing",
             "../ARCHITECTURE.md": "if-missing",

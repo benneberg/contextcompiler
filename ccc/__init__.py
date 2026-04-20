@@ -1,4 +1,5 @@
 """CCC — Code Context Compiler."""
+from .version import VERSION
 import importlib.metadata
 
 try:

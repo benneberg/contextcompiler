@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ccc-contextcompiler"
-version = "0.4.0"
+version = "0.1.0"
 description = "Generate structured, LLM-optimized context from codebases and workspaces"
 readme = "README.md"
 license = { file = "LICENSE" }

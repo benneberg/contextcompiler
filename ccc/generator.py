@@ -29,6 +29,7 @@ from .generators.entrypoints import EntryPointGenerator
 from .generators.database import DatabaseSchemaGenerator
 from .generators.contracts import ContractsGenerator
 from .generators.external import ExternalDependencyGenerator
+from .generators.capabilities import CapabilityGenerator
 from .utils.files import safe_read_text, safe_write_text, EXCLUDE_DIRS
 from .utils.formatting import get_timestamp, human_readable_size
 
@@ -266,6 +267,8 @@ class LLMContextGenerator:
             self._gen_recent_activity()
         if gc.get("external_dependencies", True):
             self._gen_external_deps(project, file_index)
+        if gc.get("capabilities", True):
+            self._gen_capabilities(project, file_index)
         if gc.get("module_summaries") and not self.quick_mode:
             self._gen_summaries(project, file_index)
         if gc.get("claude_md_scaffold"):
@@ -469,6 +472,44 @@ class LLMContextGenerator:
             self.updater.mark_generated("external-dependencies.json", content, sources)
         else:
             self.updater.mark_skipped("external-dependencies.json")
+
+    def _gen_capabilities(
+        self, project: ProjectInfo, file_index: FileIndex
+    ) -> None:
+        """Generate capabilities.json using if-missing strategy.
+
+        Capabilities are auto-generated on first run, then human-editable.
+        Re-generation only happens on --force or if the file is missing.
+        This preserves human-curated descriptions and custom edits.
+        """
+        output_path = self.output_dir / "capabilities.json"
+
+        # if-missing: never overwrite once the file exists (unless --force)
+        if not self.updater.force and output_path.exists():
+            self.updater.mark_skipped("capabilities.json")
+            return
+
+        # capabilities.json reads from other artifacts — check they exist first
+        has_routes = (self.output_dir / "routes.txt").exists()
+        has_schemas = (
+            (self.output_dir / "schemas-extracted.py").exists() or
+            (self.output_dir / "types-extracted.ts").exists()
+        )
+        has_ext_deps = (self.output_dir / "external-dependencies.json").exists()
+
+        if not has_routes and not has_schemas and not has_ext_deps:
+            return  # nothing to build from yet
+
+        reason = "force mode" if self.updater.force else "file missing"
+        print(f"   capabilities.json ({reason})")
+        gen = CapabilityGenerator(
+            self.root, self.config, file_index,
+            project.languages, project.framework,
+            service_name=project.name,
+        )
+        content, sources = gen.generate()
+        self._write("capabilities.json", content)
+        self.updater.mark_generated("capabilities.json", content, sources)
 
     def _gen_summaries(
         self, project: ProjectInfo, file_index: FileIndex
