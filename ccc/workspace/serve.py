@@ -27,7 +27,7 @@ def _build_html(index_data: dict) -> str:
     """Build the single-page workspace explorer UI."""
     index_json = json.dumps(index_data) 
     workspace_name = index_data.get("workspace", "Workspace")
-    return f"""<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -703,9 +703,14 @@ function showQueryView() {{
       <h3>Suggested Change Sequence</h3>
       ${{ordered.map((name, i) => {{
         const s = INDEX.services[name];
-        const hint = {{ 'data':'Update schema/config first', 'frontend':'Update UI last',
-          'gateway':'Update routing', 'library':'Update shared types first',
-          'backend-api':'Implement business logic', 'worker':'Update processing logic' }}[s?.type] || 'Review and update';
+const hint = {{
+  'data':'Update schema/config first',
+  'frontend':'Update UI last',
+  'gateway':'Update routing',
+  'library':'Update shared types first',
+  'backend-api':'Implement business logic',
+  'worker':'Update processing logic'
+}}[s?.type] || 'Review and update';
         return `<div class="seq-item">
           <div class="seq-num">${{i+1}}</div>
           <div class="seq-content">
@@ -733,7 +738,7 @@ function copyQueryMarkdown() {{
     if (s.depends_on?.length) md += `- **Depends on**: ${{s.depends_on.join(', ')}}\n\n`;
     if (s.exposes?.api?.length) {{
       md += `- **Exposes**:\n\n`;
-      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '\n\n\n');
+      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '`\n');
     }}
     md += '\n\n';
   }});
@@ -889,7 +894,7 @@ renderSidebar();
 showOverview();
 </script>
 </body>
-</html>"""
+</html>""".format(workspace_name=workspace_name, index_json=index_json)
 
 
 # ── HTTP server ───────────────────────────────────────────────────────────────
