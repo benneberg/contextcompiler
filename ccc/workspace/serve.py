@@ -738,9 +738,9 @@ function copyQueryMarkdown() {{
     if (s.depends_on?.length) md += `- **Depends on**: ${{s.depends_on.join(', ')}}\n\n`;
     if (s.exposes?.api?.length) {{
       md += `- **Exposes**:\n\n`;
-      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '`\n');
+      s.exposes.api.slice(0,10).forEach(a => md += '  - `' + a + '`\\n');
     }}
-    md += '\n\n';
+    md += '\\n\\n';
   }});
   md += `## Change Sequence\n\n`;
   ordered.forEach((n, i) => md += `${{i+1}}. **${{n}}**\n`);
@@ -848,25 +848,25 @@ function copyServiceMarkdown(name) {{
   const s = INDEX.services[name];
   if (!s) return;
   let md = `# ${{s.name}}\n\n`;
-  md += `- **Type**: ${{s.type}}\n`;
-  md += `- **Tags**: ${{(s.tags||[]).join(', ')}}\n`;
-  if (s.description) md += `- **Description**: ${{s.description}}\n`;
-  if (s.path) md += '- **Path**: `' + s.path + '`\n';
+  md += `- **Type**: ${{s.type}}\\n`;
+  md += `- **Tags**: ${{(s.tags||[]).join(', ')}}\\n`;
+  if (s.description) md += `- **Description**: ${{s.description}}\\n`;
+  if (s.path) md += '- **Path**: `' + s.path + '`\\n';
   const deps = s.depends_on || [];
-  if (deps.length) md += `- **Depends on**: ${{deps.join(', ')}}\n`;
+  if (deps.length) md += `- **Depends on**: ${{deps.join(', ')}}\\n`;
   const dependents = Object.values(INDEX.services).filter(sv => (sv.depends_on||[]).includes(name));
-  if (dependents.length) md += `- **Used by**: ${{dependents.map(d=>d.name).join(', ')}}\n`;
+  if (dependents.length) md += `- **Used by**: ${{dependents.map(d=>d.name).join(', ')}}\\n`;
   if (s.exposes?.api?.length) {{
-    md += `\n## API Endpoints\n\n`;
-    s.exposes.api.forEach(a => md += '- `' + a + '`\n');
+    md += `\\n## API Endpoints\\n\\n`;
+    s.exposes.api.forEach(a => md += '- `' + a + '`\\n');
   }}
   if (s.exposes?.events?.length) {{
     md += `\n## Events\n\n`;
-    s.exposes.events.forEach(e => md += `- ${{e}}\n`);
+    s.exposes.events.forEach(e => md += `- ${{e}}\\n`);
   }}
   if (s.exposes?.types?.length) {{
     md += `\n## Types\n\n`;
-    s.exposes.types.forEach(t => md += `- ${{t}}\n`);
+    s.exposes.types.forEach(t => md += `- ${{t}}\\n`);
   }}
   copyText(md);
 }}
