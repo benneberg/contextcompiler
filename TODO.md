@@ -1,8 +1,6 @@
 # CCC — Development TODO
 
-## ✅ Done
-
-# CCC — Improvement Backlog
+## CCC — Improvement Backlog
 
 > Generated from full codebase review.  
 > Three priority levels: **P1** (high impact, low-medium effort — do these first), **P2** (high value, more involved), **P3** (longer term / nice-to-have).
