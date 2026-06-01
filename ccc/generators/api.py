@@ -8,6 +8,8 @@ from .base import BaseGenerator
 from ..file_index import FileIndex
 from ..utils.files import safe_read_text
 from ..utils.formatting import get_timestamp
+from ..extractors.go import GoExtractor
+from ..extractors.rust import RustExtractor
 
 
 class APIGenerator(BaseGenerator):
@@ -40,6 +42,17 @@ class APIGenerator(BaseGenerator):
         js_lines, js_files = self._extract_js_routes()
         lines.extend(js_lines)
         source_files.extend(js_files)
+
+        langs = self.index.detect_languages()
+        if "go" in langs:
+            go_lines, go_files = self._extract_go_routes()
+            lines.extend(go_lines)
+            source_files.extend(go_files)
+
+        if "rust" in langs:
+            rs_lines, rs_files = self._extract_rust_routes()
+            lines.extend(rs_lines)
+            source_files.extend(rs_files)
 
         if len(lines) <= 3:
             return "", []
@@ -179,3 +192,35 @@ class APIGenerator(BaseGenerator):
                     ret = f": {return_type.strip()}" if return_type and return_type.strip() else ""
                     lines.append(f"  function {name}({params}){ret}")
         return lines, source_files
+
+    # ── Go routes ─────────────────────────────────────────────────────────────
+
+    def _extract_go_routes(self) -> Tuple[List[str], List[Path]]:
+        extractor = GoExtractor(self.root)
+        result = extractor.extract()
+        if not result.routes:
+            return [], []
+        lines = ["\n## Go Routes"]
+        seen_files: dict = {}
+        for route in result.routes:
+            if route["file"] not in seen_files:
+                seen_files[route["file"]] = True
+                lines.append(f"\n### {route['file']}")
+            lines.append(f"  {route['method']:7s} {route['path']}  [{route.get('framework','')}]")
+        return lines, result.source_files
+
+    # ── Rust routes ───────────────────────────────────────────────────────────
+
+    def _extract_rust_routes(self) -> Tuple[List[str], List[Path]]:
+        extractor = RustExtractor(self.root)
+        result = extractor.extract()
+        if not result.routes:
+            return [], []
+        lines = ["\n## Rust Routes"]
+        seen_files: dict = {}
+        for route in result.routes:
+            if route["file"] not in seen_files:
+                seen_files[route["file"]] = True
+                lines.append(f"\n### {route['file']}")
+            lines.append(f"  {route['method']:7s} {route['path']}  [{route.get('framework','')}]")
+        return lines, result.source_files

@@ -123,15 +123,19 @@ class SchemaGenerator(BaseGenerator):
         lines = [
             "// Auto-extracted TypeScript type definitions",
             f"// Generated: {get_timestamp()}",
+            "// Types annotated with 'used in:' show cross-file import relationships.",
             "",
         ]
         source_files: List[Path] = []
 
-        pattern = re.compile(
-            r"^export\s+(?:interface|type|enum|const\s+enum)\s+.*?"
-            r"(?:\{[\s\S]*?\n\}|=\s*[\s\S]*?;)",
+        # Phase 1: extract all type definitions per file
+        type_pattern = re.compile(
+            r"^export\s+(?:interface|type|enum|const\s+enum)\s+(\w+)"
+            r".*?(?:\{[\s\S]*?\n\}|=\s*[\s\S]*?;)",
             re.MULTILINE,
         )
+        type_defined_in: Dict[str, str] = {}
+        file_types: Dict[str, List[Tuple[str, str]]] = {}
 
         for fi in self.index.by_extension(".ts", ".tsx"):
             if ".spec.ts" in fi.path.name or ".test.ts" in fi.path.name:
@@ -139,15 +143,132 @@ class SchemaGenerator(BaseGenerator):
             content = safe_read_text(fi.path)
             if not content:
                 continue
-            matches = pattern.findall(content)
-            if matches:
+            matched_types = []
+            for m in type_pattern.finditer(content):
+                name = m.group(1)
+                text = m.group(0).strip()
+                type_defined_in[name] = fi.rel_path
+                matched_types.append((name, text))
+            if matched_types:
                 source_files.append(fi.path)
-                lines.append(f"\n// -- {fi.rel_path} --")
-                for match in matches:
-                    lines.append(match.strip())
-                    lines.append("")
+                file_types[fi.rel_path] = matched_types
+
+        # Phase 2: build import graph
+        type_used_in: Dict[str, set] = {k: set() for k in type_defined_in}
+        import_pattern = re.compile(
+            r'import\s+\{([^}]+)\}\s+from\s+[\'"]([^\'"]+)[\'"]' 
+        )
+        type_name_re = re.compile(r"\b([A-Z]\w+)\b")
+
+        for fi in self.index.by_extension(".ts", ".tsx", ".js", ".jsx"):
+            if ".spec." in fi.path.name or ".test." in fi.path.name:
+                continue
+            content = safe_read_text(fi.path)
+            if not content:
+                continue
+            for m in import_pattern.finditer(content):
+                for name_m in type_name_re.finditer(m.group(1)):
+                    name = name_m.group(1)
+                    if name in type_used_in and fi.rel_path != type_defined_in.get(name):
+                        type_used_in[name].add(fi.rel_path)
+
+        # Phase 3: emit annotated output
+        for rel_path, type_list in sorted(file_types.items()):
+            lines.append(f"\n// -- {rel_path} --")
+            for name, text in type_list:
+                lines.append(text)
+                used = sorted(type_used_in.get(name, set()))
+                if used:
+                    if len(used) > 5:
+                        shown = used[:5]
+                        lines.append(f"// used in: {', '.join(shown)} (+{len(used)-5} more)")
+                    else:
+                        lines.append(f"// used in: {', '.join(used)}")
+                lines.append("")
 
         return "\n".join(lines), source_files
+
+    def generate_type_graph(self) -> str:
+        """
+        Build type-graph.json — for each TypeScript type, record where it's
+        defined and which files import it.
+
+        Output:
+        {
+          "_meta": { "generated": "...", "total_types": N },
+          "types": {
+            "VideoConfig": {
+              "defined_in": "src/types.ts",
+              "kind": "interface",
+              "used_in": ["src/encoder.ts", "src/thumbnail.ts"]
+            }
+          }
+        }
+        """
+        import json
+        type_graph: Dict[str, dict] = {}
+
+        # Collect definitions
+        type_def_pattern = re.compile(
+            r"^export\s+(interface|type|enum|const\s+enum)\s+(\w+)",
+            re.MULTILINE,
+        )
+        type_defined_in: Dict[str, str] = {}
+        type_kind: Dict[str, str] = {}
+
+        for fi in self.index.by_extension(".ts", ".tsx"):
+            if ".spec." in fi.path.name or ".test." in fi.path.name:
+                continue
+            content = safe_read_text(fi.path)
+            if not content:
+                continue
+            for m in type_def_pattern.finditer(content):
+                kind = m.group(1).strip()
+                name = m.group(2)
+                type_defined_in[name] = fi.rel_path
+                type_kind[name] = "enum" if "enum" in kind else kind
+
+        # Build used_in map
+        type_used_in: Dict[str, List[str]] = {k: [] for k in type_defined_in}
+        import_pattern = re.compile(
+            r"""import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]"""
+        )
+        type_name_re = re.compile(r"\b([A-Z]\w+)\b")
+
+        for fi in self.index.by_extension(".ts", ".tsx", ".js", ".jsx"):
+            if ".spec." in fi.path.name or ".test." in fi.path.name:
+                continue
+            content = safe_read_text(fi.path)
+            if not content:
+                continue
+            for m in import_pattern.finditer(content):
+                for name_m in type_name_re.finditer(m.group(1)):
+                    name = name_m.group(1)
+                    if name in type_used_in and fi.rel_path not in type_used_in[name]:
+                        if fi.rel_path != type_defined_in.get(name):
+                            type_used_in[name].append(fi.rel_path)
+
+        # Assemble output — only types with cross-file relationships
+        for name, defined_in in sorted(type_defined_in.items()):
+            used = sorted(type_used_in.get(name, []))
+            type_graph[name] = {
+                "defined_in": defined_in,
+                "kind": type_kind.get(name, "type"),
+                "used_in": used,
+            }
+
+        output = {
+            "_meta": {
+                "generated": get_timestamp(),
+                "total_types": len(type_graph),
+                "note": (
+                    "TypeScript type cross-reference. "
+                    "used_in lists files that explicitly import each type."
+                ),
+            },
+            "types": type_graph,
+        }
+        return json.dumps(output, indent=2)
 
     # ── Rust ──────────────────────────────────────────────────────────────────
 

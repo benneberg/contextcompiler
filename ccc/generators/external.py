@@ -124,6 +124,8 @@ class ExternalDependencyGenerator(BaseGenerator):
         http_patterns = [
             (r'requests\.(get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)', 2),
             (r'httpx\.(get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)', 2),
+            (r'client\.(get|post|put|delete|patch)\s*\(\s*f?["\']([^"\']+)', 2),
+            (r'await\s+client\.(get|post|put|delete|patch)\s*\(\s*f?["\']([^"\'f\{]+)', 2),
             (r'aiohttp\.ClientSession\(\)\.(?:get|post|put|delete)\s*\(\s*["\']([^"\']+)', 1),
         ]
         db_patterns = [
@@ -131,6 +133,9 @@ class ExternalDependencyGenerator(BaseGenerator):
             (r'redis', "Redis"), (r'motor', "MongoDB"),
             (r'sqlalchemy.*postgresql', "PostgreSQL"),
             (r'sqlalchemy.*mysql', "MySQL"),
+            (r'from sqlalchemy|import sqlalchemy', "SQLAlchemy (ORM)"),
+            (r'sqlite3|aiosqlite', "SQLite"),
+            (r'asyncpg', "PostgreSQL"),
         ]
         mq_patterns = [
             (r'kafka', "Kafka"), (r'celery', "Celery/Redis"),

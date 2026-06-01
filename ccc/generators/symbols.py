@@ -21,6 +21,8 @@ from .base import BaseGenerator
 from ..file_index import FileIndex
 from ..utils.files import safe_read_text
 from ..utils.formatting import get_timestamp
+from ..extractors.go import GoExtractor
+from ..extractors.rust import RustExtractor
 
 
 class SymbolIndexGenerator(BaseGenerator):
@@ -48,6 +50,16 @@ class SymbolIndexGenerator(BaseGenerator):
             ts_syms, ts_files = self._index_typescript()
             symbols.update(ts_syms)
             source_files.extend(ts_files)
+
+        if "go" in langs:
+            go_syms, go_files = self._index_go()
+            symbols.update(go_syms)
+            source_files.extend(go_files)
+
+        if "rust" in langs:
+            rs_syms, rs_files = self._index_rust()
+            symbols.update(rs_syms)
+            source_files.extend(rs_files)
 
         output = {
             "_meta": {
@@ -159,3 +171,43 @@ class SymbolIndexGenerator(BaseGenerator):
                 symbols[key] = {"file": fi.rel_path, "line": line, "kind": "route"}
 
         return symbols, source_files
+
+    # ── Go ────────────────────────────────────────────────────────────────────
+
+    def _index_go(self) -> Tuple[Dict[str, dict], List[Path]]:
+        extractor = GoExtractor(self.root)
+        result = extractor.extract()
+        symbols: Dict[str, dict] = {}
+
+        for sym in result.symbols:
+            symbols[sym.name] = {
+                "file": sym.file,
+                "line": sym.line,
+                "kind": sym.kind,
+                "signature": sym.signature or "",
+            }
+        for route in result.routes:
+            key = f"{route['method']} {route['path']}"
+            symbols[key] = {"file": route["file"], "line": route["line"], "kind": "route"}
+
+        return symbols, result.source_files
+
+    # ── Rust ──────────────────────────────────────────────────────────────────
+
+    def _index_rust(self) -> Tuple[Dict[str, dict], List[Path]]:
+        extractor = RustExtractor(self.root)
+        result = extractor.extract()
+        symbols: Dict[str, dict] = {}
+
+        for sym in result.symbols:
+            symbols[sym.name] = {
+                "file": sym.file,
+                "line": sym.line,
+                "kind": sym.kind,
+                "signature": sym.signature or "",
+            }
+        for route in result.routes:
+            key = f"{route['method']} {route['path']}"
+            symbols[key] = {"file": route["file"], "line": route["line"], "kind": "route"}
+
+        return symbols, result.source_files
