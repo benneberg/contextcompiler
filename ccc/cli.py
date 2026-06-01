@@ -49,16 +49,26 @@ Examples:
         help="What information to show",
     )
     query_parser.add_argument(
-        "--generate",
-        "-g",
-        action="store_true",
+        "--generate", "-g", action="store_true",
         help="Generate workspace context for matched services",
+    )
+    query_parser.add_argument(
+        "--intent", "-i", metavar="TASK",
+        help="Natural language task description — resolve relevant services and optionally generate task context",
+    )
+    query_parser.add_argument(
+        "--depth", type=int, choices=[1, 2], default=1,
+        help="Dependency expansion depth: 1=direct, 2=transitive (default: 1)",
     )
 
     workspace_subparsers.add_parser("validate", help="Validate workspace configuration")
 
     gen_parser = workspace_subparsers.add_parser("generate", help="Generate workspace context")
     gen_parser.add_argument("--tags", "-t", nargs="+", help="Filter services by tags")
+    gen_parser.add_argument("--skip-discover", action="store_true",
+                            help="Skip automatic undeclared dependency detection after generate")
+    gen_parser.add_argument("--commit-index", action="store_true",
+                            help="Stage workspace-context/service-index.json for git commit after generation")
 
     conflicts_parser = workspace_subparsers.add_parser(
         "conflicts",
@@ -95,6 +105,12 @@ Examples:
     serve_parser.add_argument("--port", "-p", type=int, default=7842, help="Port to serve on (default: 7842)")
     serve_parser.add_argument("--no-open", action="store_true", help="Don't auto-open browser")
     serve_parser.add_argument("--no-rebuild", action="store_true", help="Skip rebuilding service-index.json")
+    serve_parser.add_argument("--bind", default="127.0.0.1", metavar="ADDR",
+                              help="Address to bind to (default: 127.0.0.1). Use 0.0.0.0 to expose on network.")
+    serve_parser.add_argument("--token", default=None, metavar="TOKEN",
+                              help="Require ?token=TOKEN in URL to access the UI")
+    serve_parser.add_argument("--auto-refresh", type=int, default=0, metavar="SECONDS",
+                              help="Auto-refresh UI every N seconds (0 = disabled). Useful when running ccc workspace generate in another terminal.")
 
     # workspace discover
     discover_parser = workspace_subparsers.add_parser(
@@ -166,6 +182,45 @@ Examples:
         help="Open PKML editor in browser after generating",
     )
 
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Interactive onboarding wizard — detects single repo vs. workspace and sets everything up",
+    )
+    setup_parser.add_argument(
+        "path", nargs="?", default=".",
+        help="Root directory to set up (default: current directory)",
+    )
+
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Show exactly what CCC extracted from a specific file",
+    )
+    inspect_parser.add_argument(
+        "file",
+        help="Path to the file to inspect",
+    )
+    inspect_parser.add_argument(
+        "--root", "-r", default=None,
+        help="Repo root directory (auto-detected if not specified)",
+    )
+
+    feedback_parser = subparsers.add_parser(
+        "feedback",
+        help="Record post-session AI feedback to improve context quality over time",
+    )
+    feedback_parser.add_argument(
+        "--analyze", action="store_true",
+        help="Summarise patterns across all recorded feedback sessions",
+    )
+    feedback_parser.add_argument(
+        "--service", default=None, metavar="NAME",
+        help="Pre-fill the service name",
+    )
+    feedback_parser.add_argument(
+        "--root", default=None, metavar="PATH",
+        help="Repo root (auto-detected if not specified)",
+    )
+
     parser.add_argument("path", nargs="?", default=".")
     parser.add_argument("--quick-update", "-q", action="store_true")
     parser.add_argument("--force", "-f", action="store_true")
@@ -176,6 +231,9 @@ Examples:
     parser.add_argument("--output", "-o")
     parser.add_argument("--config", "-c")
     parser.add_argument("--version", "-v", action="version", version=f"ccc {VERSION}")
+    parser.add_argument("--quiet", action="store_true", help="Suppress all output except warnings and errors")
+    parser.add_argument("--verbose", action="store_true", help="Enable debug-level output")
+    parser.add_argument("--log-file", metavar="PATH", help="Write log output to file")
     return parser
 
 
@@ -265,6 +323,36 @@ def handle_workspace_command(args) -> int:
         service = getattr(args, "service", None)
         what = getattr(args, "what", "all")
         generate = getattr(args, "generate", False)
+        intent = getattr(args, "intent", None)
+        depth = getattr(args, "depth", 1)
+
+        # Intent-based query: natural language → ranked services
+        if intent:
+            from .task_context import resolve_intent, generate_task_context
+            print(f"\n  Resolving intent: {intent!r}  (depth {depth})\n")
+            results = resolve_intent(manifest, intent, depth=depth)
+            if not results:
+                print("  No services matched. Try different keywords or add tags to ccc-workspace.yml.\n")
+                return 1
+            primary   = [r for r in results if r["score"] >= 20]
+            secondary = [r for r in results if r["score"] < 20]
+            print(f"  {'Service':<30s}  {'Score':>5}  Reasons")
+            print(f"  {'-'*30}  {'-'*5}  -------")
+            for r in primary:
+                print(f"  {r['name']:<30s}  {r['score']:>5}  {', '.join(r['reasons'][:3])}")
+            if secondary:
+                print(f"\n  Secondary / transitive:")
+                for r in secondary:
+                    print(f"  {r['name']:<30s}  {r['score']:>5}  {', '.join(r['reasons'][:2])}")
+            if generate:
+                print(f"\n  Generating task context package...")
+                task_dir = generate_task_context(manifest, intent, depth=depth)
+                print(f"  Written to: {task_dir}")
+                print(f"\n  Files:")
+                for f in sorted(task_dir.iterdir()):
+                    print(f"    {f.name}")
+                print()
+            return 0
 
         if tags:
             query.query_tags(tags, generate_context=generate)
@@ -273,7 +361,7 @@ def handle_workspace_command(args) -> int:
             query.query_service(service, what=what)
             return 0
 
-        print("\n  Error: Specify --tags or --service")
+        print("\n  Error: Specify --tags, --service, or --intent")
         return 1
 
     if workspace_cmd == "validate":
@@ -282,8 +370,47 @@ def handle_workspace_command(args) -> int:
 
     if workspace_cmd == "generate":
         tags = getattr(args, "tags", None)
+        skip_discover = getattr(args, "skip_discover", False)
+        commit_index = getattr(args, "commit_index", False)
         services = manifest.query_by_tags(tags) if tags else list(manifest.services.values())
         query.generate_workspace_context(services)
+
+        if commit_index:
+            index_path = manifest.root / "workspace-context" / "service-index.json"
+            if index_path.exists():
+                import subprocess as _sp
+                result = _sp.run(
+                    ["git", "add", str(index_path)],
+                    cwd=str(manifest.root),
+                    capture_output=True, text=True,
+                )
+                if result.returncode == 0:
+                    print(f"  [ok] Staged for commit: workspace-context/service-index.json")
+                    print(f"       Teammates can now run `ccc workspace serve` without cloning all repos.")
+                else:
+                    print(f"  [!] git add failed: {result.stderr.strip()}")
+            else:
+                print(f"  [!] service-index.json not found — cannot stage")
+
+        if not skip_discover:
+            from .workspace.discover import run_discovery
+            output_dir = manifest.root / "workspace-context"
+            print(f"\n  Running discovery scan...")
+            try:
+                relationships, json_path, md_path = run_discovery(
+                    manifest, services=services,
+                    output_dir=output_dir, min_confidence=0.5,
+                )
+                undeclared = [r for r in relationships if not r.declared]
+                if undeclared:
+                    print(f"  [!] {len(undeclared)} undeclared relationship(s) found.")
+                    print(f"      Review: {md_path.name}")
+                    print(f"      Run `ccc workspace discover` for full details.")
+                else:
+                    print(f"  [ok] Discovery: all relationships declared in manifest.")
+            except Exception as e:
+                print(f"  [!] Discovery scan failed: {e}")
+
         return 0
 
     if workspace_cmd in ("conflicts", "doctor"):
@@ -344,9 +471,13 @@ def handle_workspace_command(args) -> int:
         port = getattr(args, "port", 7842)
         no_open = getattr(args, "no_open", False)
         no_rebuild = getattr(args, "no_rebuild", False)
+        bind = getattr(args, "bind", "127.0.0.1")
+        token = getattr(args, "token", None)
+        auto_refresh = getattr(args, "auto_refresh", 0)
         try:
             serve_workspace(manifest, port=port, open_browser=not no_open,
-                            rebuild_index=not no_rebuild)
+                            rebuild_index=not no_rebuild, bind=bind, token=token,
+                            auto_refresh=auto_refresh)
             return 0
         except Exception as e:
             print(f"\n  Error: {e}")
@@ -360,8 +491,38 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    from .utils.logging import configure_logging
+    configure_logging(
+        verbose=getattr(args, "verbose", False),
+        quiet=getattr(args, "quiet", False),
+        log_file=getattr(args, "log_file", None),
+    )
+
     if args.command == "workspace":
         return handle_workspace_command(args)
+
+    if args.command == "setup":
+        from .setup_wizard import run_setup
+        path = getattr(args, "path", ".")
+        return run_setup(path)
+
+    if args.command == "inspect":
+        from .inspect_cmd import run_inspect
+        from pathlib import Path as _Path
+        root_arg = getattr(args, "root", None)
+        root = _Path(root_arg).resolve() if root_arg else None
+        return run_inspect(args.file, root=root)
+
+    if args.command == "feedback":
+        from .feedback import run_feedback
+        from pathlib import Path as _Path
+        root_arg = getattr(args, "root", None)
+        root = _Path(root_arg).resolve() if root_arg else None
+        return run_feedback(
+            root=root,
+            service=getattr(args, "service", None),
+            analyze=getattr(args, "analyze", False),
+        )
 
     if args.command == "pkml":
         return handle_pkml_command(args)
