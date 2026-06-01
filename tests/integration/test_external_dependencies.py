@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "llm-context-setup.py"
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
@@ -28,7 +28,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -46,7 +46,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -64,7 +64,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -86,7 +86,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -109,7 +109,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -128,7 +128,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -147,7 +147,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -169,7 +169,7 @@ class TestExternalDependencies:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -197,7 +197,7 @@ class TestExternalDependencies:
         
         # First run
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -207,7 +207,7 @@ class TestExternalDependencies:
         
         # Quick update without changes
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "--quick-update"],
+            [sys.executable, "-m", "ccc", "--quick-update"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -216,5 +216,9 @@ class TestExternalDependencies:
         # File should not be regenerated (or if regenerated, should have same content)
         new_mtime = deps_file.stat().st_mtime
         
-        # Either skipped or regenerated with same content
-        assert "external-dependencies.json" in result.stdout
+        # Either skipped or regenerated with same content — file must still be valid
+        assert result.returncode == 0, f"Quick update failed: {result.stderr}"
+        assert deps_file.exists(), "external-dependencies.json disappeared after quick update"
+        import json
+        content = json.loads(deps_file.read_text())
+        assert "depends_on" in content, "external-dependencies.json lost its structure"

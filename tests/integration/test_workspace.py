@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "llm-context-setup.py"
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 MULTI_REPO_DIR = FIXTURES_DIR / "multi-repo"
 
@@ -20,7 +20,7 @@ class TestWorkspaceManifest:
     def test_loads_workspace_manifest(self):
         """Test that workspace manifest loads correctly."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "list"],
+            [sys.executable, "-m", "ccc", "workspace", "list"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -35,7 +35,7 @@ class TestWorkspaceManifest:
     def test_workspace_list_shows_all_services(self):
         """Test that workspace list shows all services."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "list"],
+            [sys.executable, "-m", "ccc", "workspace", "list"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -52,7 +52,7 @@ class TestWorkspaceQuery:
     def test_query_by_tags(self):
         """Test querying services by tags."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "query", "--tags", "core"],
+            [sys.executable, "-m", "ccc", "workspace", "query", "--tags", "core"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -67,7 +67,7 @@ class TestWorkspaceQuery:
     def test_query_by_specific_tag(self):
         """Test querying by a specific tag."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "query", "--tags", "auth"],
+            [sys.executable, "-m", "ccc", "workspace", "query", "--tags", "auth"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -80,7 +80,7 @@ class TestWorkspaceQuery:
     def test_query_shows_dependency_order(self):
         """Test that query shows dependency order."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "query", "--tags", "core"],
+            [sys.executable, "-m", "ccc", "workspace", "query", "--tags", "core"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -95,7 +95,7 @@ class TestWorkspaceQuery:
     def test_query_specific_service(self):
         """Test querying a specific service."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "query",
+            [sys.executable, "-m", "ccc", "workspace", "query",
              "--service", "user-service", "--what", "all"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
@@ -113,7 +113,7 @@ class TestWorkspaceValidate:
     def test_validate_workspace(self):
         """Test workspace validation."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "validate"],
+            [sys.executable, "-m", "ccc", "workspace", "validate"],
             cwd=MULTI_REPO_DIR,
             capture_output=True,
             text=True,
@@ -143,7 +143,7 @@ class TestWorkspaceWithExternalDeps:
                     continue
                 
                 result = subprocess.run(
-                    [sys.executable, str(SCRIPT_PATH)],
+                    [sys.executable, "-m", "ccc"],
                     cwd=service_dir,
                     capture_output=True,
                     text=True,
@@ -168,7 +168,7 @@ class TestWorkspaceWithExternalDeps:
     def test_workspace_generate_creates_context(self, generated_workspace):
         """Test that workspace generate creates cross-repo context."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "generate"],
+            [sys.executable, "-m", "ccc", "workspace", "generate"],
             cwd=generated_workspace,
             capture_output=True,
             text=True,

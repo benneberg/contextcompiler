@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "llm-context-setup.py"
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
@@ -97,7 +97,7 @@ export const MAX_RETRIES = 3;
     def test_detects_enum_mismatch(self, workspace_with_conflicts):
         """Test that enum mismatches are detected."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_conflicts,
             capture_output=True,
             text=True,
@@ -110,7 +110,7 @@ export const MAX_RETRIES = 3;
     def test_detects_interface_mismatch(self, workspace_with_conflicts):
         """Test that interface mismatches are detected."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_conflicts,
             capture_output=True,
             text=True,
@@ -122,7 +122,7 @@ export const MAX_RETRIES = 3;
     def test_detects_constant_mismatch(self, workspace_with_conflicts):
         """Test that constant mismatches are detected."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_conflicts,
             capture_output=True,
             text=True,
@@ -134,7 +134,7 @@ export const MAX_RETRIES = 3;
     def test_generates_conflict_report(self, workspace_with_conflicts):
         """Test that conflict report is generated."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_conflicts,
             capture_output=True,
             text=True,
@@ -179,7 +179,7 @@ export interface UniqueType {
         (workspace_dir / "service-a" / "package.json").write_text('{"name": "service-a"}')
         
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_dir,
             capture_output=True,
             text=True,
@@ -191,7 +191,7 @@ export interface UniqueType {
     def test_workspace_doctor_alias(self, workspace_with_conflicts):
         """Test that 'workspace doctor' works as an alias for conflicts."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "doctor"],
+            [sys.executable, "-m", "ccc", "workspace", "doctor"],
             cwd=workspace_with_conflicts,
             capture_output=True,
             text=True,
@@ -267,7 +267,7 @@ export interface userData {
     def test_errors_cause_nonzero_exit(self, workspace_with_severity_levels):
         """Test that errors cause non-zero exit code."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_severity_levels,
             capture_output=True,
             text=True,
@@ -279,7 +279,7 @@ export interface userData {
     def test_shows_severity_counts(self, workspace_with_severity_levels):
         """Test that severity counts are shown."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "workspace", "conflicts"],
+            [sys.executable, "-m", "ccc", "workspace", "conflicts"],
             cwd=workspace_with_severity_levels,
             capture_output=True,
             text=True,

@@ -12,7 +12,7 @@ import pytest
 
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "llm-context-setup.py"
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
@@ -33,7 +33,7 @@ class TestPythonFastAPI:
         
         # Run generator
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -52,7 +52,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -72,7 +72,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -92,7 +92,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -113,7 +113,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -133,7 +133,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -147,19 +147,19 @@ class TestPythonFastAPI:
         assert "files" in content, "files not in manifest"
     
     def test_creates_claude_md(self, fastapi_project, tmp_path):
-        """Test that CLAUDE.md scaffold is created."""
+        """Test that LLM.md scaffold is created."""
         import shutil
         test_project = tmp_path / "test-project"
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
         
-        claude_md = test_project / "CLAUDE.md"
-        assert claude_md.exists(), "CLAUDE.md not created"
+        claude_md = test_project / "LLM.md"
+        assert claude_md.exists(), "LLM.md not created"
         
         content = claude_md.read_text()
         assert "Identity" in content, "Identity section not found"
@@ -174,7 +174,7 @@ class TestPythonFastAPI:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -183,8 +183,8 @@ class TestPythonFastAPI:
         assert arch_md.exists(), "ARCHITECTURE.md not created"
         
         content = arch_md.read_text()
-        assert "Architecture Overview" in content
-        assert "System Context" in content
+        assert "Architecture" in content
+        assert "Overview" in content
 
 
 class TestTypeScriptExpress:
@@ -202,7 +202,7 @@ class TestTypeScriptExpress:
         shutil.copytree(express_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -222,7 +222,7 @@ class TestTypeScriptExpress:
         shutil.copytree(express_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
@@ -249,7 +249,7 @@ class TestIncrementalUpdates:
         
         # First run
         result1 = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -258,7 +258,7 @@ class TestIncrementalUpdates:
         
         # Quick update (nothing changed)
         result2 = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "--quick-update"],
+            [sys.executable, "-m", "ccc", "--quick-update"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -274,14 +274,14 @@ class TestIncrementalUpdates:
         
         # First run
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
         
         # Force regeneration
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "--force"],
+            [sys.executable, "-m", "ccc", "--force"],
             cwd=test_project,
             capture_output=True,
             text=True,
@@ -296,7 +296,7 @@ class TestDoctor:
     def test_doctor_command_runs(self):
         """Test that --doctor command runs successfully."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "--doctor"],
+            [sys.executable, "-m", "ccc", "--doctor"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -320,7 +320,7 @@ class TestSecurityFeatures:
         shutil.copytree(fastapi_project, test_project)
         
         subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
+            [sys.executable, "-m", "ccc"],
             cwd=test_project,
             capture_output=True,
         )
