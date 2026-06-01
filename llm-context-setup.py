@@ -62,6 +62,7 @@ if USING_PACKAGE:
     if __name__ == "__main__":
         sys.exit(ccc_main())
 else:
+    pass
 # Embedded standalone version - Wrapper starts
     
 # Try to import from package
