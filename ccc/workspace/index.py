@@ -33,6 +33,7 @@ Schema:
 """
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -54,6 +55,24 @@ def _load_external_deps(service: ServiceConfig) -> Optional[Dict]:
     try:
         return json.loads(content)
     except json.JSONDecodeError:
+        return None
+
+
+def _get_last_commit_time(service: ServiceConfig) -> Optional[str]:
+    """Get ISO timestamp of the most recent git commit in the service directory."""
+    if not service.path.exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cI"],
+            cwd=str(service.path),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        ts = result.stdout.strip()
+        return ts if ts else None
+    except Exception:
         return None
 
 
@@ -158,6 +177,9 @@ def build_service_index(
         mf = _load_manifest_json(service)
         if mf:
             entry["context_generated"] = mf.get("generated_at") or mf.get("timestamp")
+
+        # Get last git commit timestamp for staleness comparison
+        entry["last_commit"] = _get_last_commit_time(service)
 
         services_data[name] = entry
 
