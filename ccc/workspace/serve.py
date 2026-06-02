@@ -14,11 +14,81 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 
 from ..utils.files import safe_read_text
 from .manifest import WorkspaceManifest
 from .index import build_service_index
+
+
+# ── WebSocket live reload ──────────────────────────────────────────────────────
+
+# Connected WebSocket clients — updated by the WS server thread
+_ws_clients: Set = set()
+_ws_clients_lock = threading.Lock()
+
+
+def _start_websocket_server(ws_port: int, index_path: Path) -> None:
+    """
+    Start a WebSocket server in a background thread that watches
+    service-index.json and pushes 'reload' events to all connected clients.
+
+    Falls back silently if websockets or watchdog are unavailable.
+    """
+    try:
+        import asyncio
+        import websockets
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+    except ImportError:
+        return
+
+    loop = asyncio.new_event_loop()
+
+    # ── WebSocket handler ──────────────────────────────────────────────────
+    async def ws_handler(websocket):
+        with _ws_clients_lock:
+            _ws_clients.add(websocket)
+        try:
+            await websocket.wait_closed()
+        finally:
+            with _ws_clients_lock:
+                _ws_clients.discard(websocket)
+
+    async def broadcast(msg: str) -> None:
+        with _ws_clients_lock:
+            clients = set(_ws_clients)
+        if clients:
+            import asyncio as _asyncio
+            await _asyncio.gather(
+                *[c.send(msg) for c in clients],
+                return_exceptions=True,
+            )
+
+    # ── File watcher ───────────────────────────────────────────────────────
+    class _IndexChangeHandler(FileSystemEventHandler):
+        def on_modified(self, event):
+            if Path(event.src_path) == index_path:
+                asyncio.run_coroutine_threadsafe(
+                    broadcast('{"type":"reload"}'), loop
+                )
+
+    observer = Observer()
+    observer.schedule(_IndexChangeHandler(), str(index_path.parent), recursive=False)
+    observer.start()
+
+    # ── Start WS server in this thread's event loop ────────────────────────
+    async def _run():
+        async with websockets.serve(ws_handler, "127.0.0.1", ws_port):
+            await asyncio.Future()  # run forever
+
+    try:
+        loop.run_until_complete(_run())
+    except Exception:
+        pass
+    finally:
+        observer.stop()
+        observer.join()
 
 
 # ── HTML UI ───────────────────────────────────────────────────────────────────
@@ -1618,6 +1688,45 @@ showOverview();
 </html>""").format(workspace_name=workspace_name, index_json=index_json)
 
 
+
+def _inject_ws_client(html: str, ws_port: int) -> str:
+    """
+    Inject a WebSocket client script into the HTML that reconnects automatically
+    and reloads the page when the server sends a reload event.
+    Injected just before </body> so it does not block page rendering.
+    """
+    ws_script = (
+        "<script>\n"
+        "(function() {\n"
+        "  var wsPort = " + str(0) + ";\n"  # placeholder, replaced below
+        "}).apply(this);\n"
+        "</script>\n"
+    )
+    # Build the actual script with the port number
+    ws_script = """<script>
+(function() {
+  var wsPort = """ + str(0) + """;
+  var indicator = document.createElement('div');
+  indicator.style.cssText = 'position:fixed;bottom:12px;left:16px;font-size:10px;color:var(--muted);z-index:999;padding:2px 6px;background:var(--surface);border-radius:3px';
+  indicator.textContent = 'live reload: connecting...';
+  document.body.appendChild(indicator);
+  function connect() {
+    var ws = new WebSocket('ws://127.0.0.1:' + wsPort);
+    ws.onopen = function() { indicator.textContent = 'live reload: connected'; indicator.style.color = 'var(--green)'; };
+    ws.onmessage = function(e) {
+      try { var msg = JSON.parse(e.data); if (msg.type === 'reload') { indicator.textContent = 'live reload: refreshing...'; setTimeout(function() { window.location.reload(); }, 200); } } catch(err) {}
+    };
+    ws.onclose = function() { indicator.textContent = 'live reload: reconnecting...'; indicator.style.color = 'var(--yellow)'; setTimeout(connect, 2000); };
+    ws.onerror = function() { indicator.textContent = 'live reload: unavailable'; indicator.style.color = 'var(--muted)'; };
+  }
+  connect();
+})();
+</script>"""
+    # Replace the placeholder port with the actual port
+    ws_script = ws_script.replace(str(0) + ";", str(ws_port) + ";", 1)
+    return html.replace("</body>", ws_script + "\n</body>", 1)
+
+
 # ── HTTP server ───────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
@@ -1670,6 +1779,7 @@ def serve_workspace(
     bind: str = "127.0.0.1",
     token: Optional[str] = None,
     auto_refresh: int = 0,
+    live_reload: bool = False,
 ) -> None:
     """
     Launch the workspace browser UI.
@@ -1682,6 +1792,7 @@ def serve_workspace(
         bind:           Address to bind to (default: 127.0.0.1)
         token:          Optional access token required as ?token=<value>
         auto_refresh:   Poll interval in seconds (0 = disabled)
+        live_reload:    Enable WebSocket live reload via watchdog
     """
     # Build/refresh service index
     index_path = manifest.root / "workspace-context" / "service-index.json"
@@ -1702,6 +1813,17 @@ def serve_workspace(
 
     html = _build_html(index_data, auto_refresh=auto_refresh)
 
+    # Start WebSocket server for live reload if requested
+    ws_port = port + 1  # e.g. 7842 → WS on 7843
+    if live_reload:
+        ws_thread = threading.Thread(
+            target=_start_websocket_server,
+            args=(ws_port, index_path),
+            daemon=True,
+        )
+        ws_thread.start()
+        html = _inject_ws_client(html, ws_port)
+
     _Handler.html = html
     _Handler.index_json = content
     _Handler.token = token
@@ -1716,6 +1838,8 @@ def serve_workspace(
     print(f"  CCC Workspace Explorer")
     print(f"  Serving: {url_display}")
     print(f"  Workspace: {manifest.name} ({len(manifest.services)} services)")
+    if live_reload:
+        print(f"  Live reload: enabled (ws://127.0.0.1:{ws_port})")
     if bind != "127.0.0.1":
         print(f"  [!] Bound to {bind} -- accessible on network")
     if token:
