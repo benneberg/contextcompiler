@@ -10,6 +10,7 @@ from ..utils.files import safe_read_text
 from ..utils.formatting import get_timestamp
 from ..extractors.go import GoExtractor
 from ..extractors.rust import RustExtractor
+from ..extractors.csharp import CSharpExtractor
 
 
 class APIGenerator(BaseGenerator):
@@ -53,6 +54,11 @@ class APIGenerator(BaseGenerator):
             rs_lines, rs_files = self._extract_rust_routes()
             lines.extend(rs_lines)
             source_files.extend(rs_files)
+
+        if "csharp" in langs:
+            cs_lines, cs_files = self._extract_csharp_routes()
+            lines.extend(cs_lines)
+            source_files.extend(cs_files)
 
         if len(lines) <= 3:
             return "", []
@@ -217,6 +223,21 @@ class APIGenerator(BaseGenerator):
         if not result.routes:
             return [], []
         lines = ["\n## Rust Routes"]
+        seen_files: dict = {}
+        for route in result.routes:
+            if route["file"] not in seen_files:
+                seen_files[route["file"]] = True
+                lines.append(f"\n### {route['file']}")
+            lines.append(f"  {route['method']:7s} {route['path']}  [{route.get('framework','')}]")
+        return lines, result.source_files
+    # ── C# routes ─────────────────────────────────────────────────────────────
+
+    def _extract_csharp_routes(self) -> Tuple[List[str], List[Path]]:
+        extractor = CSharpExtractor(self.root)
+        result = extractor.extract()
+        if not result.routes:
+            return [], []
+        lines = ["\n## C# Routes"]
         seen_files: dict = {}
         for route in result.routes:
             if route["file"] not in seen_files:

@@ -42,6 +42,7 @@ from ..utils.files import safe_read_text, should_skip_path
 from ..utils.formatting import get_timestamp
 from ..extractors.go import GoExtractor
 from ..extractors.rust import RustExtractor
+from ..extractors.csharp import CSharpExtractor
 
 
 class CallGraphGenerator(BaseGenerator):
@@ -87,6 +88,11 @@ class CallGraphGenerator(BaseGenerator):
             rs_meta, rs_files = self._extract_rust_meta()
             meta.update(rs_meta)
             source_files.extend(rs_files)
+
+        if "csharp" in langs:
+            cs_meta, cs_files = self._extract_csharp_meta()
+            meta.update(cs_meta)
+            source_files.extend(cs_files)
 
         # Build called_by (reverse map)
         called_by: Dict[str, Set[str]] = defaultdict(set)
@@ -328,5 +334,17 @@ class CallGraphGenerator(BaseGenerator):
         meta: Dict[str, dict] = {}
         for sym in result.symbols:
             if sym.kind == "function":
+                meta[sym.name] = {"file": sym.file, "line": sym.line}
+        return meta, result.source_files
+
+    # ── C# (meta only) ────────────────────────────────────────────────────────
+
+    def _extract_csharp_meta(self) -> Tuple[Dict[str, dict], List[Path]]:
+        """Populate function metadata from C# source via CSharpExtractor."""
+        extractor = CSharpExtractor(self.root)
+        result = extractor.extract()
+        meta: Dict[str, dict] = {}
+        for sym in result.symbols:
+            if sym.kind == "method":
                 meta[sym.name] = {"file": sym.file, "line": sym.line}
         return meta, result.source_files

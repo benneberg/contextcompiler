@@ -23,6 +23,7 @@ from ..utils.files import safe_read_text
 from ..utils.formatting import get_timestamp
 from ..extractors.go import GoExtractor
 from ..extractors.rust import RustExtractor
+from ..extractors.csharp import CSharpExtractor
 
 
 class SymbolIndexGenerator(BaseGenerator):
@@ -60,6 +61,11 @@ class SymbolIndexGenerator(BaseGenerator):
             rs_syms, rs_files = self._index_rust()
             symbols.update(rs_syms)
             source_files.extend(rs_files)
+
+        if "csharp" in langs:
+            cs_syms, cs_files = self._index_csharp()
+            symbols.update(cs_syms)
+            source_files.extend(cs_files)
 
         output = {
             "_meta": {
@@ -196,6 +202,25 @@ class SymbolIndexGenerator(BaseGenerator):
 
     def _index_rust(self) -> Tuple[Dict[str, dict], List[Path]]:
         extractor = RustExtractor(self.root)
+        result = extractor.extract()
+        symbols: Dict[str, dict] = {}
+
+        for sym in result.symbols:
+            symbols[sym.name] = {
+                "file": sym.file,
+                "line": sym.line,
+                "kind": sym.kind,
+                "signature": sym.signature or "",
+            }
+        for route in result.routes:
+            key = f"{route['method']} {route['path']}"
+            symbols[key] = {"file": route["file"], "line": route["line"], "kind": "route"}
+
+        return symbols, result.source_files
+    # ── C# ────────────────────────────────────────────────────────────────────
+
+    def _index_csharp(self) -> Tuple[Dict[str, dict], List[Path]]:
+        extractor = CSharpExtractor(self.root)
         result = extractor.extract()
         symbols: Dict[str, dict] = {}
 
