@@ -9,9 +9,9 @@ the context window with raw source files.
 ```bash
 pip install ccc-contextcompiler
 ccc                        # generate context for current directory
-ccc query "UserService"    # query artifacts at runtime
-ccc align                  # check code matches product documentation
-ccc workspace serve        # open browser UI for the whole team
+ccc inspect src/auth.py    # debug what CCC extracted from a file
+ccc context-for "add webm support"  # assemble task-specific context
+ccc workspace serve        # open browser UI for multi-repo workspaces
 ```
 
 ---
@@ -22,30 +22,31 @@ Most AI coding tools try to make LLMs smarter about code. CCC takes the opposite
 
 > **Make code understandable first. Then give it to LLMs.**
 
-Like a compiler, CCC transforms source code into a well-defined intermediate representation
-(IR). The `.llm-context/` directory is that IR — deterministic, precise, cacheable,
-and consumable by any tool.
+Like a compiler, CCC transforms source code into a well-defined intermediate representation (IR).
+The `.llm-context/` directory is that IR — deterministic, precise, cacheable, and consumable
+by any tool.
 
 ```
 Code → CCC (IR) → .llm-context/ artifacts
                         ↓
                Query Engine    ← runtime interrogation
+               Intent Resolver ← natural language → relevant services
                Graph Analysis  ← impact reasoning
                Alignment       ← intent vs reality
                         ↓
                LLMs / Copilot / CI / Tools
 ```
 
-**CCC = Reality** (what exists, extracted deterministically from code)  
-**PKML = Intent** (what should exist, declared by humans)  
+**CCC = Reality** (what exists, extracted deterministically from code)
+**PKML = Intent** (what should exist, declared by humans)
 The Alignment Engine combines them — never merge the two sources.
 
 ---
 
 ## Why It Exists
 
-Modern codebases are too large, too distributed, and too implicit for LLMs to work with
-directly. The most valuable engineering knowledge is rarely in the code itself:
+Modern codebases are too large, too distributed, and too implicit for LLMs to work with directly.
+The most valuable engineering knowledge is rarely in the code itself:
 
 - Which modules are dangerous and why
 - What conventions the team actually follows
@@ -63,16 +64,15 @@ CCC makes that knowledge **extractable, structured, portable, and reusable**.
 |---|---|---|---|---|
 | **Extracts semantic context** | ✓ | ✗ | Partial | ✗ |
 | **Symbol → file:line index** | ✓ | ✗ | ✓ | ✗ |
-| **Convention detection** | ✓ | ✗ | ✗ | ✗ |
+| **Call graph tracing** | ✓ | ✗ | Partial | ✗ |
+| **Change surface ranking** | ✓ | ✗ | ✗ | ✗ |
 | **Cross-repo analysis** | ✓ | ✗ | ✗ | ✗ |
-| **Undeclared dep discovery** | ✓ | ✗ | ✗ | ✗ |
-| **Intent vs reality check** | ✓ | ✗ | ✗ | ✗ |
+| **Intent → services resolver** | ✓ | ✗ | ✗ | ✗ |
+| **Token budget hints** | ✓ | ✗ | ✗ | ✗ |
+| **AI feedback loop** | ✓ | ✗ | ✗ | ✗ |
 | **Offline / corporate safe** | ✓ | ✓ | ✗ | ✓ |
 | **CI-ready, incremental** | ✓ | ✗ | ✗ | ✗ |
 | **Zero required deps** | ✓ | ✗ | ✗ | ✓ |
-
-**vs Repomix:** Repomix concatenates files. CCC extracts *semantic* context (types,
-routes, dependencies, conventions) and keeps it queryable and incrementally updated.
 
 ---
 
@@ -88,8 +88,9 @@ With optional features:
 
 ```bash
 pip install "ccc-contextcompiler[yaml]"    # YAML workspace manifests (recommended)
-pip install "ccc-contextcompiler[watch]"   # watch mode
+pip install "ccc-contextcompiler[watch]"   # watch mode (requires watchdog)
 pip install "ccc-contextcompiler[ai]"      # LLM module summaries
+pip install "ccc-contextcompiler[live]"    # WebSocket live reload (requires websockets)
 pip install "ccc-contextcompiler[all]"     # everything
 ```
 
@@ -102,54 +103,66 @@ pip install -e .                           # Linux / Mac
 pip install -e . --break-system-packages   # if pip complains on Linux
 ```
 
-On Windows, if you get a setuptools error:
-```bash
-python -m pip install --upgrade pip setuptools wheel
-pip install -e .
-```
-
-### Standalone (zero dependencies)
-
-```bash
-curl -O https://raw.githubusercontent.com/benneberg/contextcompiler/main/llm-context-setup.py
-python3 llm-context-setup.py
-```
-
 **Requirements:** Python 3.10+. Core generation has zero mandatory dependencies.
 
 ---
 
 ## Quick Start
 
+### First time — interactive setup
+
 ```bash
-ccc --doctor           # verify your environment
-ccc                    # generate context for current directory
-ccc --quick-update     # fast incremental update after code changes
-ccc query "User"       # interrogate the generated artifacts
-ccc align              # check code matches product documentation
+ccc setup          # auto-detects single repo vs multi-repo, runs full pipeline
 ```
 
-After the first run:
+This replaces the manual init → generate → serve sequence. It detects git repos,
+asks a few questions, and produces a working setup.
+
+### Single repository
+
+```bash
+ccc                    # generate context for current directory
+ccc --quick-update     # fast incremental update after code changes
+ccc --force            # ignore cache, regenerate everything
+ccc inspect src/auth.py # debug what CCC extracted from a specific file
+ccc feedback           # record post-AI-session notes to improve context over time
+```
+
+### Multi-repo workspace
+
+```bash
+ccc workspace serve                              # browse all services in the UI
+ccc workspace query --intent "add webm support"  # find relevant services by task
+ccc context-for "add webm support" --budget 8000 # ready-to-paste #file: block
+```
+
+After the first run, your project has:
 
 ```
 your-project/
 ├── .llm-context/
-│   ├── tree.txt                     directory structure
-│   ├── routes.txt                   API route map
-│   ├── public-api.txt               exported function signatures
-│   ├── schemas-extracted.py         Python dataclasses, Pydantic, enums
-│   ├── types-extracted.ts           TypeScript interfaces, types, enums
-│   ├── dependency-graph.txt         internal import relationships
-│   ├── dependency-graph.md          Mermaid dependency diagram
-│   ├── symbol-index.json            symbol → file:line navigation map
-│   ├── external-dependencies.json   what this service exposes and consumes
-│   ├── env-shape.txt                environment variable template
-│   ├── db-schema.txt                database models (SQLAlchemy, Prisma, etc.)
-│   ├── entry-points.json            main files, servers, CLI entry points
-│   ├── recent-commits.txt           last 20 git commits
-│   └── manifest.json                generation metadata and cache
-├── LLM.md                           auto-detected conventions, patterns, dangerous files
-└── ARCHITECTURE.md                  architecture description scaffold
+│   ├── LLM.md                    ← conventions, entry points, known gaps, AI instructions
+│   ├── context-manifest.json     ← artifact index with token estimates (read this first)
+│   ├── ai-observations.md        ← AI session notes (append after each session)
+│   ├── tree.txt                  ← directory structure
+│   ├── routes.txt                ← API route map
+│   ├── public-api.txt            ← exported function signatures
+│   ├── call-graph.json           ← 2-level function call graph
+│   ├── change-surface.json       ← files ranked by likelihood of needing edits
+│   ├── symbol-index.json         ← symbol → file:line navigation map
+│   ├── schemas-extracted.py      ← Python dataclasses, Pydantic models, enums
+│   ├── types-extracted.ts        ← TypeScript interfaces, types, enums (with cross-file annotations)
+│   ├── type-graph.json           ← TypeScript type cross-reference (defined_in, used_in)
+│   ├── external-dependencies.json ← service boundary contracts
+│   ├── dependency-graph.txt      ← internal import relationships
+│   ├── dependency-graph.md       ← Mermaid dependency diagram
+│   ├── capabilities.json         ← semantic capability groups
+│   ├── db-schema.txt             ← database models
+│   ├── env-shape.txt             ← environment variable template
+│   ├── entry-points.json         ← main files, servers, CLI entry points
+│   └── manifest.json             ← generation metadata and hash cache
+├── LLM.md                        ← architecture overview (if-missing, edit freely)
+└── ARCHITECTURE.md               ← architecture scaffold (if-missing, edit freely)
 ```
 
 ---
@@ -160,249 +173,254 @@ your-project/
 
 ```bash
 ccc [path]                    Generate context for a project (default: current dir)
-ccc --quick-update  / -q      Incremental update — only regenerates changed files
-ccc --force         / -f      Ignore cache, regenerate everything from scratch
+ccc --quick-update  / -q      Incremental — only regenerates changed files
+ccc --force         / -f      Ignore cache, regenerate everything
 ccc --watch                   Watch mode — auto-update on file save
 ccc --with-summaries          Add LLM-powered module summaries (requires [ai])
+ccc --quiet                   Suppress all output except warnings and errors
+ccc --verbose                 Show debug-level output
+ccc --log-file PATH           Write log output to a file
 ccc --doctor                  Diagnostics — Python version, project structure, status
-ccc --security-status         Show current security mode and redaction settings
-ccc --output DIR    / -o DIR  Write context to a custom directory
-ccc --config FILE   / -c FILE Use a custom llm-context.yml or .json config
-ccc --version       / -v      Print version
+ccc --security-status         Show security mode and redaction settings
+ccc --version                 Print version
 ```
 
----
+### `ccc setup` — Interactive Onboarding
+
+The recommended starting point. Auto-detects whether you're in a single repo or
+a multi-repo workspace and runs the correct pipeline.
+
+```bash
+ccc setup              # from workspace root or inside any git repo
+ccc setup /path/to/ws  # explicit path
+```
+
+What it does:
+- Detects git repositories in the current directory
+- For single repos: runs `ccc` and shows next steps
+- For multi-repo: prompts for workspace name, lets you select repos,
+  runs `ccc` in each, then `workspace generate`
+
+### `ccc inspect <file>` — Per-File Context Debugger
+
+Shows exactly what CCC extracted from a specific file. Essential for diagnosing
+incomplete or incorrect context.
+
+```bash
+ccc inspect src/thumbnail/encoder.py
+ccc inspect --root /path/to/repo src/auth.py
+```
+
+Output sections:
+- **File info** — language, size, modified date, binary/excluded status
+- **Symbols** — functions and classes extracted (with line numbers)
+- **Routes** — HTTP routes registered in this file
+- **Imports** — external imports detected
+- **Artifact index** — which `.llm-context/` artifacts reference this file and with what symbols
+
+### `ccc context-for <task>` — Task-Scoped Context Assembly
+
+Assembles a token-budget-aware context package for a specific task across a
+workspace. Outputs `#file:` blocks ready to paste into Copilot or Claude.
+
+```bash
+ccc context-for "add webm support to thumbnail pipeline"
+ccc context-for "add webm support" --budget 12000
+ccc context-for "add oauth login" --depth 2          # include transitive deps
+ccc context-for "refactor auth" --generate            # also write task files
+ccc context-for "add webm support" --workspace /path/to/ws
+```
+
+Output: a ranked table of matched services with scores and token estimates,
+followed by a copyable `#file:` block that stays within the token budget.
+
+`--generate` additionally writes `workspace-context/task-{slug}/`:
+- `TASK-CONTEXT.md` — which services, why, implementation order
+- `relevant-symbols.txt` — symbols matching the task keywords
+- `relevant-routes.txt` — routes matching the task keywords
+- `change-sequence.md` — topologically ordered implementation plan
+
+### `ccc feedback` — AI Session Feedback Recorder
+
+Records what worked, what was missing, and what the AI had to guess after
+an AI-assisted coding session. Builds up signal in `feedback-log.jsonl`
+that helps improve context over time.
+
+```bash
+ccc feedback                      # interactive prompts (~2 min)
+ccc feedback --service auth       # pre-fill service name
+ccc feedback --analyze            # summarise patterns across all sessions
+```
+
+Saves to:
+- `.llm-context/feedback-log.jsonl` — structured entries
+- `.llm-context/ai-observations.md` — human-readable session notes
+
+`--analyze` shows sufficiency breakdown, common missing items, most-discussed
+services, and files frequently needed but not in LLM.md.
 
 ### `ccc query` — Interrogate Artifacts at Runtime
 
-Query `.llm-context/` artifacts without reading files manually.
-
 ```bash
 ccc query TERM                         Search across all artifact types
-ccc query --type symbol  TERM          Symbol lookup (classes, functions, types)
+ccc query --type symbol  TERM          Symbol lookup
 ccc query --type route   TERM          Route/endpoint search
-ccc query --type impact  TERM          What breaks if this symbol changes?
+ccc query --type impact  TERM          What breaks if this changes?
 ccc query --type context TERM          Build an LLM-ready focused context block
-ccc query --type api     TERM          Search public function signatures
-ccc query --type all     TERM          Explicit all-types search (default)
-
-ccc query --format human   TERM        Human-readable terminal output (default)
-ccc query --format json    TERM        Machine-readable JSON (pipe to other tools)
-ccc query --format compact TERM        Minimal token output (for prompt injection)
-ccc query --format markdown TERM       Markdown block (for Copilot Chat)
-
-ccc query --limit 20       TERM        Max results per section (default: 10)
-ccc query --context-dir DIR TERM       Point at a non-default .llm-context/
+ccc query --format json  TERM          Machine-readable output
+ccc query --format markdown TERM       Markdown block for Copilot Chat
+ccc query --limit 20     TERM          Max results per section
 ```
-
-**Examples:**
-
-```bash
-ccc query "UserService"                      # find everything named UserService
-ccc query --type symbol  CreateUserRequest   # exact file:line location
-ccc query --type route   /api/users          # route search
-ccc query --type impact  UserModel           # what depends on UserModel?
-ccc query --type context "authentication"    # LLM-ready focused context block
-ccc query --format json  "platform"          # pipe to jq or other tools
-ccc query --format compact "user" --limit 5  # minimal prompt injection
-```
-
-**Python API:**
-
-```python
-from ccc.query import CCCQueryEngine
-
-engine = CCCQueryEngine(".llm-context")
-
-# Unified search across all artifacts
-result = engine.query("user")
-# result.symbols, result.routes, result.public_api, result.schemas, result.dependencies
-
-# Exact symbol lookup
-sym = engine.find_symbol("CreateUserRequest")
-# sym.file → "services/users.py", sym.line → 42, sym.kind → "class"
-
-# Impact analysis: what depends on this?
-impact = engine.find_impact("UserModel")
-# impact["direct_dependents"], impact["transitive_dependents"], impact["total_affected"]
-
-# LLM context builder — precise, focused, minimal tokens
-context = engine.build_llm_context("authentication flow", format="markdown")
-# Returns a focused markdown block — paste directly into Copilot Chat or any LLM
-
-# Output formats
-json_ctx    = engine.build_llm_context("user", format="json")
-compact_ctx = engine.build_llm_context("user", format="compact")
-
-# Engine stats
-print(engine.stats())
-# {"symbols": 142, "routes": 28, "dependency_edges": 67, ...}
-```
-
-Install `networkx` for graph-aware transitive impact analysis:
-```bash
-pip install networkx
-```
-
----
 
 ### `ccc align` — Detect Drift Between Code and Documentation
-
-Compares what the code actually does (CCC artifacts) against what product
-documentation says it should do (PKML). Degrades gracefully — partial PKML
-gives partial checking, no PKML gives a helpful message rather than an error.
 
 ```bash
 ccc align                              Auto-detect pkml.json, show drift report
 ccc align --pkml path/to/pkml.json     Use a specific PKML file
 ccc align --format json                Machine-readable output for CI
-ccc align --context-dir DIR            Point at a non-default .llm-context/
 ```
 
-**Example output:**
-
-```
-  PKML completeness: 80%
-
-  ✓  Confirmed (5 match):
-     ✓  GET /api/users
-     ✓  POST /api/users
-     ✓  DELETE /api/users/{id}
-     ✓  GET /api/users/{id}
-     ✓  POST /api/events/track
-
-  ✗  Errors (1):
-     ✗  POST /api/auth/reset-password
-        In PKML but not found in routes.txt
-        → Implement this endpoint or remove it from PKML
-
-  ⚠  Warnings (1):
-     ⚠  DELETE /internal/purge-cache
-        In code but not declared in PKML
-        → Add to PKML exposes.api or prefix with /internal/
-
-  Summary: 1 error(s), 1 warning(s), 5 confirmed
-```
-
-**In CI (exit code 1 on errors):**
-```yaml
-- name: Verify code matches documentation
-  run: ccc --force && ccc align
-```
-
----
-
-### `ccc pkml` — Bootstrap Product Knowledge
-
-Generate a `pkml.json` draft from generated `.llm-context/` files.
-Requires `.llm-context/` to exist first — run `ccc` before `ccc pkml`.
-
-```bash
-ccc pkml                       Generate pkml.json in product-knowledge/
-ccc pkml --output DIR          Custom output directory
-ccc pkml --open                Open PKML editor in browser after generating
-```
-
----
+Exit code 1 on errors — suitable as a CI gate.
 
 ### `ccc workspace` — Multi-Repository Mode
 
-All workspace commands work from a directory containing a `ccc-workspace.yml` file,
-or with `--workspace path/to/ccc-workspace.yml`.
-
 ```bash
-# Setup
-ccc workspace init [path]               Scan directories, generate ccc-workspace.yml
-ccc workspace init --name my-platform   Set workspace name
-ccc workspace init --output DIR         Write manifest to a specific directory
-ccc workspace init --force              Overwrite existing manifest
+# Setup (or use `ccc setup` for the interactive version)
+ccc workspace init [path]              Scan directories, generate ccc-workspace.yml
 
-# Inspection
-ccc workspace list                      List all services with tags and status
-ccc workspace validate                  Check paths exist, detect circular deps
+# Daily use
+ccc workspace list                     List all services with tags and status
+ccc workspace validate                 Check paths exist, detect circular deps
+ccc workspace serve                    Open browser UI at http://localhost:7842
 
-# Service discovery
-ccc workspace query --tags core                    Find services by tag
-ccc workspace query --tags auth users              Multiple tags (matches either)
-ccc workspace query --service NAME                 Inspect one service (all info)
-ccc workspace query --service NAME --what info     Basic info only
-ccc workspace query --service NAME --what depends-on
-ccc workspace query --service NAME --what dependents
-ccc workspace query --service NAME --what external
-ccc workspace query --tags TAG --generate           Also generate workspace context
+# Service query — three modes
+ccc workspace query --tags auth core       Find services by tag
+ccc workspace query --service auth         Inspect one service
+ccc workspace query --intent "add webm"    Natural language → ranked services
+ccc workspace query --intent "add webm" --generate   Also write task context files
+ccc workspace query --intent "add webm" --depth 2    Include transitive deps
 
 # Context generation
-ccc workspace generate                  Build cross-repo WORKSPACE.md, API map,
-                                        change sequence, dependency graph
-ccc workspace generate --tags TAG       Filter to specific services
+ccc workspace generate                 Build workspace index and context
+ccc workspace generate --skip-discover Skip undeclared dependency scan
+ccc workspace generate --commit-index  Stage service-index.json for git commit
 
-# Dependency discovery
-ccc workspace discover                  Find undeclared cross-repo dependencies
-ccc workspace discover --tags TAG       Filter to specific services
-ccc workspace discover --min-confidence 0.7  Stricter threshold (default: 0.5)
-ccc workspace discover --output DIR     Custom output directory
+# Dependency discovery (also runs automatically after workspace generate)
+ccc workspace discover                 Find undeclared cross-repo dependencies
+ccc workspace discover --min-confidence 0.7
 
 # Conflict detection
-ccc workspace conflicts                 Detect type conflicts, API mismatches,
-                                        naming inconsistencies across repos
-ccc workspace conflicts --tags TAG      Filter services
-ccc workspace conflicts --output DIR    Custom report location
-ccc workspace doctor                    Alias for conflicts
+ccc workspace conflicts                Detect type conflicts, API mismatches across repos
+ccc workspace doctor                   Alias for conflicts
 
-# Browser UI
-ccc workspace serve                     Open browser UI at http://localhost:7842
-ccc workspace serve --port 8080         Custom port
-ccc workspace serve --no-open           Don't auto-open browser
-ccc workspace serve --no-rebuild        Skip rebuilding service-index.json
+# Browser UI options
+ccc workspace serve --port 8080
+ccc workspace serve --no-open          Don't auto-open browser
+ccc workspace serve --no-rebuild       Skip rebuilding service-index.json
+ccc workspace serve --bind 0.0.0.0     Expose on network (use with caution)
+ccc workspace serve --token SECRET     Require ?token=SECRET in URL
+ccc workspace serve --auto-refresh 30  Poll for changes every 30 seconds
+ccc workspace serve --live-reload      WebSocket live reload (instant, requires websockets+watchdog)
 ```
+
+---
+
+## The Serve UI
+
+`ccc workspace serve` opens a browser UI at `http://localhost:7842` with:
+
+**Sidebar navigation:**
+- **Overview** — stats, tag cloud, service list
+- **Dependencies** — declared dependency matrix + discover hint
+- **Reports** — Coverage Map, Stale Context, Change Impact
+- **Task Intent** — natural language task search with "Copy for Copilot" export
+- **Find Service** — filter by name
+- **Filter by tag** — click tags to filter, `+ save view` to persist
+- **Saved Views** — named tag filter sets stored in browser localStorage
+
+**Service detail view:**
+- API endpoints, dependencies, types, events
+- Context freshness indicator (stale warning if commits are newer than last `ccc` run)
+- "Copy for LLM" and "Download JSON" buttons
+
+**Intent query** (the Task Intent input):
+- Type a task description — results update as you type
+- Scores services by name match, tag match, API endpoint match, description match,
+  and tech-hint expansion (e.g. "webm" → media, encoder, codec tags)
+- "Copy for Copilot" button emits `#file:` blocks for all matched services
+
+**Report views:**
+- **Coverage Map** — tiers services as Full / Partial / Basic / None
+- **Stale Context** — shows which services have commits newer than their last `ccc` run
+- **Change Impact** — select a service, see direct and transitive dependents + dependencies
 
 ---
 
 ## Output Files Reference
 
-| File | Contents |
-|------|----------|
-| `tree.txt` | Annotated directory structure |
-| `routes.txt` | API route map (FastAPI, Flask, Express, NestJS, etc.) |
-| `public-api.txt` | Exported function signatures with types |
-| `schemas-extracted.py` | Python dataclasses, Pydantic models, enums |
-| `types-extracted.ts` | TypeScript interfaces, types, enums |
-| `dependency-graph.txt` | Internal import relationships (text) |
-| `dependency-graph.md` | Mermaid dependency diagram |
-| `symbol-index.json` | Symbol → file:line navigation index |
-| `external-dependencies.json` | Service boundary contracts (exposes + consumes) |
-| `env-shape.txt` | Environment variable shape |
-| `db-schema.txt` | Database models (SQLAlchemy, Django, Prisma, TypeORM) |
-| `entry-points.json` | Main files, servers, CLI entry points |
-| `recent-commits.txt` | Last 20 git commits |
-| `LLM.md` | Auto-detected conventions, dangerous files, patterns |
-| `ARCHITECTURE.md` | Architecture description scaffold |
+| File | Contents | Update strategy |
+|------|----------|-----------------|
+| `context-manifest.json` | Artifact index with token estimates and task guidance | always |
+| `call-graph.json` | 2-level function call graph (`calls`, `called_by`) | if-changed |
+| `change-surface.json` | Files ranked by edit likelihood (fan-in, recency, pattern density) | if-changed |
+| `symbol-index.json` | Symbol → file:line navigation index | if-changed |
+| `tree.txt` | Annotated directory structure | always |
+| `routes.txt` | API route map | if-changed |
+| `public-api.txt` | Exported function signatures | if-changed |
+| `schemas-extracted.py` | Python dataclasses, Pydantic models, enums | if-changed |
+| `types-extracted.ts` | TypeScript interfaces/types/enums with `// used in:` annotations | if-changed |
+| `type-graph.json` | TypeScript cross-file type resolution (`defined_in`, `used_in`) | if-changed |
+| `external-dependencies.json` | Service boundary contracts (exposes + consumes) | if-changed |
+| `capabilities.json` | Semantic capability groups | if-missing |
+| `dependency-graph.txt` | Internal import relationships | if-changed |
+| `dependency-graph.md` | Mermaid dependency diagram | if-changed |
+| `db-schema.txt` | Database models (SQLAlchemy, Django, Prisma, TypeORM) | if-changed |
+| `env-shape.txt` | Environment variable shape | if-changed |
+| `entry-points.json` | Main files, servers, CLI entry points | if-changed |
+| `ai-observations.md` | AI session notes — **never overwritten**, append freely | if-missing |
+| `LLM.md` *(project root)* | Conventions, patterns, known gaps, AI instructions | if-missing |
+| `ARCHITECTURE.md` *(project root)* | Architecture description scaffold | if-missing |
+
+`LLM.md.suggested-updates` is written alongside `LLM.md` when drift is detected
+(new routes or dependencies not mentioned in the current LLM.md). Delete it once reviewed.
 
 ---
 
 ## Language Support
 
-| Language | Schemas | Routes | Signatures | Deps |
-|----------|---------|--------|------------|------|
-| Python | ✓ | ✓ | ✓ | ✓ |
-| TypeScript | ✓ | ✓ | ✓ | ✓ |
-| JavaScript | — | ✓ | — | ✓ |
-| Rust | ✓ | — | — | — |
-| Go | ✓ | — | — | — |
-| C# | ✓ | — | — | — |
+| Language | Symbols | Routes | Types | Call Graph | Deps |
+|----------|---------|--------|-------|------------|------|
+| Python | ✓ AST | ✓ | ✓ | ✓ AST | ✓ |
+| TypeScript | ✓ | ✓ | ✓ + cross-file | ✓ regex | ✓ |
+| JavaScript | ✓ | ✓ | — | ✓ regex | ✓ |
+| Go | ✓ | ✓ gin/fiber/chi/mux | ✓ struct/interface | meta | ✓ go.mod |
+| Rust | ✓ pub fn/struct/enum | ✓ actix/axum macros | ✓ | meta | ✓ Cargo.toml |
+| C# | ✓ public methods/classes | ✓ ASP.NET + Minimal API | ✓ class/interface/record | meta | ✓ csproj |
+
+"meta" = functions appear in call graph for `called_by` lookups but outgoing calls
+are not traced (would require a full language parser).
 
 ---
 
 ## Multi-Repository Workspace — Full Workflow
 
-### Step 1 — Initialize
+### Option A — Interactive (recommended)
 
 ```bash
-cd ~/company          # directory containing your service repos
-ccc workspace init .  # auto-scans, generates ccc-workspace.yml draft
+cd ~/company    # directory containing your service repos
+ccc setup       # detects multi-repo, walks you through the whole setup
 ```
 
-Edit the generated manifest to fill in descriptions and correct `depends_on` relationships:
+### Option B — Manual
+
+**Step 1 — Initialize**
+
+```bash
+cd ~/company
+ccc workspace init .    # auto-scans, generates ccc-workspace.yml
+```
+
+Edit the manifest:
 
 ```yaml
 # ccc-workspace.yml
@@ -414,7 +432,7 @@ services:
     path: ./auth-service
     type: backend-api
     tags: [auth, security, core]
-    description: "Authentication and authorization"
+    description: "JWT authentication and authorization"
 
   user-service:
     path: ./user-service
@@ -423,122 +441,52 @@ services:
     depends_on: [auth-service]
     description: "User profiles and management"
 
-  client:
-    path: ./client
-    type: frontend
-    tags: [ui, platforms, core]
+  thumbnail-service:
+    path: ./thumbnail-service
+    type: backend-api
+    tags: [media, thumbnail, encoder]
     depends_on: [user-service]
-    description: "Web and device client"
+    description: "Video thumbnail generation and encoding"
 ```
 
-### Step 2 — Generate context per service
+**Step 2 — Generate context per service**
 
 ```bash
-cd auth-service && ccc && cd ..
-cd user-service && ccc && cd ..
-cd client       && ccc && cd ..
+cd auth-service      && ccc && cd ..
+cd user-service      && ccc && cd ..
+cd thumbnail-service && ccc && cd ..
 ```
 
-### Step 3 — Build workspace context
+**Step 3 — Build workspace index**
 
 ```bash
 ccc workspace generate
+# Also runs workspace discover automatically — prints undeclared dep summary
 ```
 
-Produces `workspace-context/` with:
-- `WORKSPACE.md` — what these services do together, how they connect
-- `cross-repo-api.txt` — all API calls between services
-- `change-sequence.md` — correct order to implement changes (from dependency graph)
-- `dependency-graph.md` — Mermaid cross-repo diagram
-- `service-index.json` — cached index for offline queries and the UI
-
-### Step 4 — Discover undeclared dependencies
+**Step 4 — Browse and query**
 
 ```bash
-ccc workspace discover
+ccc workspace serve                                  # UI at localhost:7842
+ccc workspace query --intent "add webm support"      # CLI intent search
+ccc context-for "add webm support" --budget 8000     # ready-to-paste context
 ```
 
-Reads `.llm-context/` artifacts and surfaces hidden coupling nobody put in the manifest.
-Four detection methods:
+### Sharing the workspace index
 
-| Method | What It Finds | Confidence |
-|--------|--------------|------------|
-| API route matching | Service A calls routes that Service B exposes | 75–95% |
-| Schema cross-reference | Same type defined differently in two services | 50–85% |
-| Shared infrastructure | Services sharing the same database, cache, or queue | 45–70% |
-| Event coupling | Event emitted by one service, consumed by another | 88% |
-
-Output: `workspace-context/discovered-relationships.md` and `.json`
-
-### Step 5 — Open the browser UI
+Commit `workspace-context/service-index.json` so teammates can browse the UI
+without cloning all service repos:
 
 ```bash
-ccc workspace serve    # opens http://localhost:7842
+ccc workspace generate --commit-index   # stages the file for you
+git commit -m "chore: update workspace index"
 ```
 
-Works for the whole team — no coding required. Features:
-- Tag-based service filtering
-- Service detail view with API endpoints, dependencies, types
-- Dependency graph with declared vs discovered relationships
-- Suggested change sequence for any task
-- Copy-as-Markdown (for LLM prompts) and Download-as-JSON
+Then any teammate with just the workspace repo can run `ccc workspace serve`.
 
 ---
 
-## Daily Developer Workflow
-
-### Single repo, solo work
-
-```bash
-# Morning: refresh context after overnight changes
-ccc --quick-update
-
-# Working on a task: query for relevant context
-ccc query --type context "user authentication"  # paste into Copilot Chat
-ccc query --type impact  "UserModel"             # check blast radius before changing
-ccc query --type route   "/api/auth"             # find all auth-related endpoints
-
-# After significant changes: update context
-ccc --quick-update       # <2 seconds, only regenerates what changed
-
-# Before a PR: verify alignment
-ccc align                # check nothing documented is missing from code
-```
-
-### Multi-repo task (e.g. "implement tizen-tep platform support")
-
-```bash
-# Discover which repos are involved
-ccc workspace query --tags platforms
-
-# Check for undeclared dependencies first
-ccc workspace discover --tags platforms
-
-# Open the UI for a visual overview
-ccc workspace serve
-
-# Get LLM-ready context for the task
-ccc workspace query --tags platforms --generate
-# Then paste workspace-context/WORKSPACE.md into your LLM session
-```
-
-### Automated: git hook
-
-```bash
-# .git/hooks/post-commit
-#!/bin/bash
-if git diff HEAD~1 --name-only 2>/dev/null | grep -qE "\.(py|ts|js|go|rs)$"; then
-  ccc --quick-update
-fi
-```
-
-```bash
-chmod +x .git/hooks/post-commit
-```
-
----
-
-## GitHub Copilot Integration
+## Using with GitHub Copilot
 
 ### `.github/copilot-instructions.md`
 
@@ -546,15 +494,17 @@ chmod +x .git/hooks/post-commit
 # Copilot Instructions
 
 Before suggesting any change, review:
-- `LLM.md` — conventions, patterns, dangerous areas
-- `ARCHITECTURE.md` — system design
+- `LLM.md` — conventions, patterns, known gaps, dangerous areas
+- `.llm-context/context-manifest.json` — what artifacts exist and their token costs
 - `.llm-context/routes.txt` — all API endpoints
 - `.llm-context/schemas-extracted.py` — data models
 - `.llm-context/symbol-index.json` — where things live (file:line)
-- `.llm-context/external-dependencies.json` — service contracts
+- `.llm-context/call-graph.json` — how functions call each other
+- `.llm-context/change-surface.json` — which files most likely need editing
 
 Never create a symbol without checking symbol-index.json first.
 Never add a route without checking routes.txt first.
+After completing a task, append a note to .llm-context/ai-observations.md.
 ```
 
 ### `.vscode/settings.json`
@@ -563,133 +513,119 @@ Never add a route without checking routes.txt first.
 {
   "github.copilot.chat.codeGeneration.instructions": [
     { "file": "LLM.md" },
-    { "file": "ARCHITECTURE.md" },
     { "file": ".llm-context/routes.txt" },
     { "file": ".llm-context/schemas-extracted.py" },
     { "file": ".llm-context/public-api.txt" },
     { "file": ".llm-context/external-dependencies.json" }
-  ],
-  "github.copilot.chat.testGeneration.instructions": [
-    { "file": "LLM.md" },
-    { "file": ".llm-context/schemas-extracted.py" },
-    { "file": ".llm-context/public-api.txt" }
   ]
 }
 ```
 
-### Using `ccc query` with Copilot Chat
-
-Instead of uploading entire context files, query for what's relevant:
+### Task-based workflow with Copilot Agent
 
 ```bash
-ccc query --type context "authentication flow" --format markdown
-# Copy the output, paste into Copilot Chat before your question
+# 1. Find which services are relevant
+ccc context-for "add webm thumbnail support" --budget 8000
+
+# 2. Copy the output #file: block into Copilot Chat, then ask your question
+
+# 3. After the session, record what worked
+ccc feedback --service thumbnail-service
+```
+
+The `context-for` output looks like:
+```
+#file:thumbnail-service/.llm-context/LLM.md
+#file:media-storage/.llm-context/LLM.md
+#file:shared-types/.llm-context/LLM.md
+
+Task: add webm thumbnail support
 ```
 
 ---
 
-## LLM.md — Auto-Detected Conventions
+## LLM.md — What Gets Generated
 
-Generated from real code analysis, not a static template:
+Auto-detected from source analysis. Contains:
 
-```markdown
-## Stack
-- Languages: python
-- Framework: fastapi, sqlalchemy
-- API Style: REST
-- Database: SQLAlchemy
-- Logging: structlog, stdlib logging
+- **Stack** — languages, frameworks, API style, database, logging
+- **Entry Points** — main files, server startup
+- **Critical Conventions** — error handling, async patterns, testing framework
+- **Dangerous Areas** — files with payment processing, auth, crypto, migrations
+- **Common Gotchas** — TODOs for you to fill in about race conditions, ordering
+- **Known Gaps** — auto-populated from source TODOs/FIXMEs and `ccc align` output
+- **Generated Context** — list of `.llm-context/` artifacts with guidance
+- **For the AI Assistant** — template for appending session notes to `ai-observations.md`
 
-## Critical Conventions
-
-### Error Handling
-Exception-based (try/except)
-
-### Testing
-- Python: pytest
-
-### Async/Await
-Heavy async (~73% of functions)
-
-### Code Quality
-- Linters: ruff
-- Type checking: mypy
-
-## Dangerous Areas
-- `services/payment.py` — Payment processing | Cryptography
-- `middleware/auth.py`  — Authentication | Password handling
-- `db/migrations/`     — Database migration
-
-## Generated Context
-See .llm-context/ for auto-extracted context:
-- routes.txt — API routes
-- schemas-extracted.py — type definitions
-- symbol-index.json — symbol → file:line map
-- external-dependencies.json — service boundary contracts
-```
+`LLM.md` uses the `if-missing` strategy — it is never overwritten after first generation.
+Edit it freely. Run `ccc` to get a `LLM.md.suggested-updates` file when new routes or
+dependencies are detected that aren't mentioned in the current version.
 
 ---
 
-## CCC and PKML
+## AI Feedback Loop
 
-CCC and PKML serve different purposes and should never be merged:
+CCC has a lightweight feedback system for improving context quality over time.
 
-| | CCC | PKML |
-|--|-----|------|
-| **Input** | Source code | Human-written descriptions |
-| **Output** | `.llm-context/` | `pkml.json` |
-| **Answers** | *How does this code work?* | *What is this product supposed to do?* |
-| **Updates** | Automated (CI / git hook) | Manual (product team) |
-| **Owner** | Engineering | Product / Engineering |
+**During a session:** The `LLM.md` scaffold instructs AI assistants to append
+notes to `.llm-context/ai-observations.md` after completing a task.
 
-```bash
-ccc          # generate .llm-context/ from code
-ccc pkml     # bootstrap pkml.json draft from generated artifacts
-ccc align    # continuously verify code matches declared product intent
-```
+**After a session:** Run `ccc feedback` to record structured notes interactively.
 
-The Alignment Engine (`ccc align`) is the only place these two sources combine.
-It exits with code 1 when the code diverges from the PKML declaration —
-making it suitable as a CI gate.
+**Over time:** Run `ccc feedback --analyze` to see patterns — which services
+generate the most incomplete context, what's most often missing, which files
+the AI needed that weren't referenced in LLM.md.
+
+Both `ai-observations.md` and `feedback-log.jsonl` are never overwritten by `ccc`.
+They belong to you and accumulate indefinitely.
 
 ---
 
 ## Incremental Updates
 
 | Strategy | Behaviour | Used for |
-|----------|-----------|---------|
-| `always` | Regenerate every run | `tree.txt`, `recent-commits.txt` |
-| `if-changed` | Only regenerate when source files change | `routes.txt`, `schemas-extracted.*`, etc. |
-| `if-missing` | Generate once, never overwrite | `LLM.md`, `ARCHITECTURE.md` |
+|----------|-----------|---------:|
+| `always` | Regenerate every run | `tree.txt`, `recent-commits.txt`, `context-manifest.json` |
+| `if-changed` | Only when source files change | most artifacts |
+| `if-missing` | Generate once, never overwrite | `LLM.md`, `ARCHITECTURE.md`, `ai-observations.md` |
 
 ```bash
-ccc --quick-update   # respects if-changed (fast, <2s on most repos)
+ccc --quick-update   # respects if-changed, very fast on large repos
 ccc                  # normal run
-ccc --force          # regenerate everything, ignore cache
+ccc --force          # ignore cache, regenerate everything
 ```
 
 ---
 
-## Security Modes
+## Security
 
 | Mode | Description |
 |------|-------------|
-| `offline` | No external AI calls. All analysis local. **Default.** Safe for corporate/proprietary code. |
-| `private-ai` | Use internal infrastructure (Azure OpenAI, self-hosted models). |
-| `public-ai` | Use external providers (Anthropic, OpenAI). Warning shown before sending code. |
+| `offline` | No external calls. All analysis local. **Default.** Safe for corporate code. |
+| `private-ai` | Use internal AI infrastructure (Azure OpenAI, self-hosted). |
+| `public-ai` | Use external providers. Warning shown before sending code. |
 
-Secret redaction is automatic in all modes. API keys, passwords, and tokens are masked.
+Secret redaction patterns (applied automatically in all modes):
+- Environment variable assignments: `API_KEY=`, `PASSWORD=`, `SECRET=`, `TOKEN=`
+- HTTP auth headers: `Bearer ...`, `Basic ...`
+- PEM private key blocks
+- Connection strings: `postgresql://user:pass@host`, `amqp://...`
+- AWS-style access keys: `AKIA...`
+- JSON-embedded secrets: `"password": "value"`
+
+Audit logging appends to `.llm-context/audit.log` in JSON Lines format.
+The file rotates at 5MB, keeping the last 10,000 entries.
+
+```bash
+ccc --security-status    # show current mode and settings
+```
 
 ```yaml
 # llm-context.yml
 security:
-  mode: offline
+  mode: offline          # offline | private-ai | public-ai
   redact_secrets: true
   audit_log: true
-```
-
-```bash
-ccc --security-status    # show current mode and redaction settings
 ```
 
 ---
@@ -710,6 +646,7 @@ exclude_patterns:
   - node_modules
   - __pycache__
   - dist
+  - .llm-context
 
 generate:
   tree: true
@@ -717,25 +654,17 @@ generate:
   routes: true
   public_api: true
   dependencies: true
-  dependency_graph_mermaid: true
   symbol_index: true
+  call_graph: true         # 2-level function call graph
+  change_surface: true     # file relevance ranking
   entry_points: true
   db_schema: true
   env_shape: true
   external_dependencies: true
+  capabilities: true
   claude_md_scaffold: true       # generates LLM.md
   architecture_md_scaffold: true # generates ARCHITECTURE.md
   module_summaries: false        # requires [ai] extra
-
-update_strategies:
-  tree.txt: always
-  schemas-extracted.py: if-changed
-  ../LLM.md: if-missing          # never overwrite after manual edits
-
-llm_summaries:
-  provider: anthropic            # or: openai
-  model: claude-haiku-4-5-20251001
-  max_modules: 30
 ```
 
 ---
@@ -744,61 +673,72 @@ llm_summaries:
 
 ```
 contextcompiler/
-├── llm-context-setup.py       standalone zero-dependency entrypoint
+├── llm-context-setup.py           standalone zero-dependency entrypoint
 ├── ccc/
-│   ├── cli.py                 command dispatch (all subcommands)
-│   ├── generator.py           orchestrator — parallel artifact generation
-│   ├── query.py               runtime query engine (CCCQueryEngine)
-│   ├── alignment.py           CCC vs PKML drift detection (AlignmentEngine)
-│   ├── file_index.py          FileIndex + HashCache (single scan, shared)
-│   ├── manifest.py            SmartUpdater, GenerationManifest
-│   ├── config.py              config loading, defaults, merging
-│   ├── models.py              shared dataclasses (ProjectInfo, ServiceConfig, etc.)
-│   ├── doctor.py              diagnostics
-│   ├── watch.py               watch mode
+│   ├── cli.py                     command dispatch (all subcommands)
+│   ├── generator.py               orchestrator — parallel artifact generation
+│   ├── setup_wizard.py            ccc setup — interactive onboarding
+│   ├── inspect_cmd.py             ccc inspect — per-file context debugger
+│   ├── task_context.py            ccc context-for — task context assembly
+│   ├── feedback.py                ccc feedback — AI session recorder
+│   ├── query.py                   runtime query engine (CCCQueryEngine)
+│   ├── alignment.py               CCC vs PKML drift detection
+│   ├── file_index.py              FileIndex + HashCache (single scan, shared)
+│   ├── manifest.py                SmartUpdater, GenerationManifest
+│   ├── config.py                  config loading, defaults, merging
+│   ├── models.py                  shared dataclasses
+│   ├── doctor.py                  diagnostics
+│   ├── watch.py                   watch mode
 │   ├── extractors/
-│   │   ├── python.py          Python AST extraction
-│   │   └── typescript.py      TypeScript/JS extraction
+│   │   ├── base.py                BaseExtractor, ExtractionResult, ExtractedSymbol
+│   │   ├── python.py              Python AST extraction
+│   │   ├── typescript.py          TypeScript/JS extraction
+│   │   ├── go.py                  Go extraction (funcs, structs, gin/fiber routes, go.mod)
+│   │   ├── rust.py                Rust extraction (pub fn, actix/axum macros, Cargo.toml)
+│   │   └── csharp.py              C# extraction (methods, ASP.NET/Minimal API, csproj)
 │   ├── generators/
-│   │   ├── tree.py            directory structure
-│   │   ├── api.py             API route extraction
-│   │   ├── schemas.py         type/schema extraction
-│   │   ├── dependencies.py    dependency graph
-│   │   ├── symbols.py         symbol index
-│   │   ├── entrypoints.py     entry point detection
-│   │   ├── database.py        database schema extraction
-│   │   ├── contracts.py       OpenAPI/GraphQL contracts
-│   │   ├── external.py        service boundary contracts
-│   │   ├── summaries.py       LLM-powered module summaries
-│   │   ├── claude_md.py       convention detection → LLM.md
-│   │   └── pkml.py            PKML bootstrapper
+│   │   ├── api.py                 API route extraction (Python, TS, Go, Rust, C#)
+│   │   ├── callgraph.py           2-level function call graph
+│   │   ├── changesurface.py       change surface ranking
+│   │   ├── capabilities.py        semantic capability groups
+│   │   ├── claude_md.py           convention detection → LLM.md (with Known Gaps)
+│   │   ├── contracts.py           OpenAPI/GraphQL contracts
+│   │   ├── database.py            database schema extraction
+│   │   ├── dependencies.py        dependency graph
+│   │   ├── entrypoints.py         entry point detection
+│   │   ├── external.py            service boundary contracts
+│   │   ├── schemas.py             type/schema extraction + type-graph.json
+│   │   ├── summaries.py           LLM-powered module summaries
+│   │   ├── symbols.py             symbol index (Python, TS, Go, Rust, C#)
+│   │   └── tree.py                directory structure
 │   ├── security/
-│   │   ├── manager.py         security mode enforcement, secret redaction
-│   │   └── modes.py           SecurityMode type
+│   │   └── manager.py             security mode, secret redaction, audit log
 │   ├── utils/
-│   │   ├── files.py           safe I/O, path utilities
-│   │   ├── formatting.py      timestamps, human-readable sizes
-│   │   └── hashing.py         file hashing for incremental updates
+│   │   ├── files.py               safe I/O, path utilities
+│   │   ├── formatting.py          timestamps, human-readable sizes
+│   │   ├── hashing.py             file hashing for incremental updates
+│   │   └── logging.py             structured logging, --quiet/--verbose/--log-file
 │   └── workspace/
-│       ├── manifest.py        WorkspaceManifest, dependency ordering
-│       ├── query.py           workspace query + context generation
-│       ├── conflicts.py       cross-repo conflict detection
-│       ├── discover.py        CrossRepoDiscovery — undeclared dep detection
-│       ├── init.py            workspace init — directory scanner
-│       ├── index.py           service-index.json builder
-│       ├── serve.py           browser UI server
-│       └── aggregator.py      workspace aggregation utilities
+│       ├── index.py               service-index.json builder (with last_commit timestamps)
+│       ├── manifest.py            WorkspaceManifest, dependency ordering
+│       ├── query.py               workspace query + context generation
+│       ├── conflicts.py           cross-repo conflict detection
+│       ├── discover.py            CrossRepoDiscovery — undeclared dep detection
+│       ├── init.py                workspace init — directory scanner
+│       └── serve.py               browser UI server + WebSocket live reload
 └── tests/
-    ├── unit/                  unit tests per module
-    ├── integration/           end-to-end tests with fixtures
-    └── fixtures/              python-fastapi, typescript-express, multi-repo
+    ├── unit/
+    │   ├── test_extractors.py     Go, Rust, C# extractor unit tests (42 tests)
+    │   └── test_generators.py     TypeScript type resolution unit tests
+    ├── integration/               end-to-end tests with real fixture projects
+    └── fixtures/                  python-fastapi, typescript-express, multi-repo
 ```
 
 ---
 
 ## CI Integration
 
-### Per-repo: keep context always fresh
+### Keep context always fresh
 
 ```yaml
 # .github/workflows/ccc-update.yml
@@ -838,54 +778,52 @@ jobs:
 ## Testing
 
 ```bash
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # Mac/Linux
-pip install -r tests/requirements.txt
-python tests/run_tests.py --verbose
+pip install -e ".[dev]"        # or: pip install pytest
+python -m pytest tests/ -q     # run all 91 tests
+python -m pytest tests/unit/   # unit tests only
+python -m pytest tests/integration/  # integration tests only
 ```
 
-CI runs on Python 3.10, 3.11, 3.12 via GitHub Actions on every push.
+Tests run on Python 3.10, 3.11, 3.12 via GitHub Actions on every push.
 
----
-
-## Contributing
-
-Contributions welcome. Especially valuable:
-
-- Language extractors (Java, Kotlin, Ruby, PHP)
-- Framework-specific patterns (NestJS, tRPC, Next.js App Router, Prisma, Django REST)
-- Confidence score calibration data for `workspace discover`
-- Real-world output examples from production codebases
-
----
-
-## License
-
-MIT — see LICENSE.
+Current test count: **91 passing** (40 integration + 42 unit extractor + 9 unit generator).
 
 ---
 
 ## Status
 
-**Functional and actively developed.**
+**Actively developed.**
 
 | Feature | Status |
 |---------|--------|
 | Single-repo generation | ✅ Stable |
-| Workspace mode (init/query/generate/conflicts) | ✅ Stable |
-| Cross-repo discovery (`workspace discover`) | ✅ Working, confidence scores being calibrated |
-| Query engine (`ccc query`) | ✅ Working, lexical today |
-| Alignment engine (`ccc align`) | ✅ Working |
-| Browser UI (`workspace serve`) | ✅ Working |
-| LLM module summaries (`--with-summaries`) | ✅ Working (requires [ai]) |
-| Graph-aware impact analysis | ✅ Working (requires `pip install networkx`) |
+| Workspace mode (init/query/generate/discover/conflicts) | ✅ Stable |
+| Interactive setup (`ccc setup`) | ✅ Working |
+| Per-file debugger (`ccc inspect`) | ✅ Working |
+| Task context assembly (`ccc context-for`) | ✅ Working |
+| AI feedback loop (`ccc feedback`) | ✅ Working |
+| Intent-based service resolution | ✅ Working (UI + CLI) |
+| Browser UI with report views | ✅ Working |
+| WebSocket live reload (`--live-reload`) | ✅ Working |
+| Saved views in UI (localStorage) | ✅ Working |
+| Call graph generation | ✅ Working |
+| Change surface ranking | ✅ Working |
+| TypeScript cross-file type resolution | ✅ Working |
+| LLM.md drift detection | ✅ Working |
+| Known Gaps in LLM.md | ✅ Working |
+| Python extraction | ✅ Stable (AST-based) |
+| TypeScript/JS extraction | ✅ Stable |
+| Go extraction | ✅ Working |
+| Rust extraction | ✅ Working |
+| C# extraction | ✅ Working |
+| Java extraction | 🔲 Planned |
+| Query engine (`ccc query`) | ✅ Working (lexical) |
 | Semantic/embedding search | 🔲 Planned (Phase 2) |
+| Alignment engine (`ccc align`) | ✅ Working |
+| LLM module summaries (`--with-summaries`) | ✅ Working (requires [ai]) |
 | VSCode extension | 🔲 Planned |
-
-The `ccc` package is modular and installable via pip. The standalone
-`llm-context-setup.py` remains available as a zero-dependency fallback for
-environments where pip install isn't possible.
+| MCP server | 🔲 Planned |
+| GitHub Actions integration | 🔲 Planned |
 
 ---
 
