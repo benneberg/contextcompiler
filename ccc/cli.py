@@ -111,6 +111,8 @@ Examples:
                               help="Require ?token=TOKEN in URL to access the UI")
     serve_parser.add_argument("--auto-refresh", type=int, default=0, metavar="SECONDS",
                               help="Auto-refresh UI every N seconds (0 = disabled). Useful when running ccc workspace generate in another terminal.")
+    serve_parser.add_argument("--live-reload", action="store_true",
+                              help="Enable WebSocket live reload — UI updates instantly when workspace generate runs (requires websockets + watchdog)")
 
     # workspace discover
     discover_parser = workspace_subparsers.add_parser(
@@ -221,6 +223,31 @@ Examples:
         help="Repo root (auto-detected if not specified)",
     )
 
+    context_for_parser = subparsers.add_parser(
+        "context-for",
+        help="Assemble token-budget-aware context for a task — outputs #file: blocks ready to paste into Copilot/Claude",
+    )
+    context_for_parser.add_argument(
+        "task",
+        help="Natural language task description (e.g. 'add webm support to thumbnail pipeline')",
+    )
+    context_for_parser.add_argument(
+        "--budget", type=int, default=8000, metavar="TOKENS",
+        help="Target token budget for the assembled context (default: 8000)",
+    )
+    context_for_parser.add_argument(
+        "--depth", type=int, choices=[1, 2], default=1,
+        help="Dependency expansion depth: 1=direct, 2=transitive (default: 1)",
+    )
+    context_for_parser.add_argument(
+        "--generate", action="store_true",
+        help="Also write task context files to workspace-context/task-{slug}/",
+    )
+    context_for_parser.add_argument(
+        "--workspace", default=None, metavar="PATH",
+        help="Path to workspace root with ccc-workspace.yml (auto-detected if not specified)",
+    )
+
     parser.add_argument("path", nargs="?", default=".")
     parser.add_argument("--quick-update", "-q", action="store_true")
     parser.add_argument("--force", "-f", action="store_true")
@@ -262,6 +289,142 @@ def load_runtime_config(args, root: Path) -> dict:
             return config
 
     return load_config(root)
+
+
+def _handle_context_for(args) -> int:
+    """
+    Handler for `ccc context-for "task description"`.
+
+    Finds a workspace (via ccc-workspace.yml), scores services by relevance
+    to the task, assembles a token-budget-aware context package, and prints
+    a ready-to-paste #file: block for Copilot/Claude.
+    """
+    from pathlib import Path as _Path
+    from .task_context import resolve_intent, generate_task_context
+
+    task  = args.task
+    budget = getattr(args, "budget", 8000)
+    depth  = getattr(args, "depth", 1)
+    generate = getattr(args, "generate", False)
+    ws_arg = getattr(args, "workspace", None)
+
+    # Auto-detect workspace root
+    if ws_arg:
+        ws_root = _Path(ws_arg).resolve()
+    else:
+        ws_root = _Path.cwd()
+        for p in [_Path.cwd()] + list(_Path.cwd().parents):
+            for name in ("ccc-workspace.yml", "ccc-workspace.yaml", "ccc-workspace.json"):
+                if (p / name).exists():
+                    ws_root = p
+                    break
+            else:
+                continue
+            break
+
+    # Load manifest
+    ws_file = None
+    for name in ("ccc-workspace.yml", "ccc-workspace.yaml", "ccc-workspace.json"):
+        candidate = ws_root / name
+        if candidate.exists():
+            ws_file = candidate
+            break
+
+    if not ws_file:
+        print(f"\n  Error: no ccc-workspace.yml found (searched from {_Path.cwd()})")
+        print(f"  Run `ccc workspace init` first, or use --workspace PATH\n")
+        return 1
+
+    from .workspace.manifest import WorkspaceManifest
+    manifest = WorkspaceManifest.load(ws_file)
+
+    print(f"\n{'=' * 60}")
+    print(f"  ccc context-for: {task!r}")
+    print(f"  Workspace: {manifest.name} ({len(manifest.services)} services)")
+    print(f"  Budget: ~{budget:,} tokens  |  Depth: {depth}")
+    print(f"{'=' * 60}\n")
+
+    results = resolve_intent(manifest, task, depth=depth)
+    if not results:
+        print("  No services matched. Try different keywords or add tags to ccc-workspace.yml.\n")
+        return 1
+
+    primary   = [r for r in results if r["score"] >= 20]
+    secondary = [r for r in results if r["score"] < 20]
+
+    # Load context-manifest.json to get token estimates
+    token_estimates: dict = {}
+    index_path = ws_root / "workspace-context" / "service-index.json"
+    if index_path.exists():
+        import json as _json
+        try:
+            idx_data = _json.loads(index_path.read_text())
+            for svc_name, svc_data in idx_data.get("services", {}).items():
+                path = svc_data.get("path", "")
+                cm_path = ws_root / path / ".llm-context" / "context-manifest.json"
+                if cm_path.exists():
+                    cm = _json.loads(cm_path.read_text())
+                    token_estimates[svc_name] = cm.get("total_estimated_tokens", 0)
+        except Exception:
+            pass
+
+    print("  Matched services:\n")
+    total_tokens = 0
+    file_block_lines = []
+    over_budget = False
+
+    for r in results:
+        svc = r["svc"]
+        name = r["name"]
+        path = svc.get("path", name)
+        has_ctx = svc.get("has_context", False)
+        est = token_estimates.get(name, 0)
+        tier = "primary" if r["score"] >= 20 else "secondary"
+        tier_color = "●" if tier == "primary" else "○"
+
+        reasons_str = ", ".join(r["reasons"][:3])
+        token_str = f"~{est:,} tokens" if est else "no context"
+
+        print(f"  {tier_color} {name:<28s}  score={r['score']:3d}  {token_str}")
+        print(f"    {reasons_str}")
+
+        if has_ctx:
+            new_total = total_tokens + est
+            if new_total <= budget or total_tokens == 0:
+                file_block_lines.append(f"#file:{path}/.llm-context/LLM.md")
+                total_tokens = new_total
+            else:
+                if not over_budget:
+                    print(f"\n  [!] Budget ~{budget:,} tokens reached — remaining services excluded from file block")
+                    over_budget = True
+        else:
+            print(f"    [!] No context — run `ccc` in {path} first")
+        print()
+
+    # Print the copyable block
+    if file_block_lines:
+        print(f"{'─' * 60}")
+        print(f"  Copy for Copilot / Claude  (~{total_tokens:,} tokens)\n")
+        for line in file_block_lines:
+            print(f"  {line}")
+        print()
+        print(f"  Task: {task}")
+        print(f"{'─' * 60}\n")
+    else:
+        print("  No services with generated context found.")
+        print("  Run `ccc` inside each service directory first.\n")
+
+    # Optionally generate task context files
+    if generate:
+        print("  Generating task context package...")
+        task_dir = generate_task_context(manifest, task, depth=depth)
+        print(f"  Written: {task_dir}")
+        for f in sorted(task_dir.iterdir()):
+            size = f.stat().st_size
+            print(f"    {f.name:<30s}  {size:,} bytes")
+        print()
+
+    return 0
 
 
 def handle_workspace_command(args) -> int:
@@ -474,10 +637,11 @@ def handle_workspace_command(args) -> int:
         bind = getattr(args, "bind", "127.0.0.1")
         token = getattr(args, "token", None)
         auto_refresh = getattr(args, "auto_refresh", 0)
+        live_reload = getattr(args, "live_reload", False)
         try:
             serve_workspace(manifest, port=port, open_browser=not no_open,
                             rebuild_index=not no_rebuild, bind=bind, token=token,
-                            auto_refresh=auto_refresh)
+                            auto_refresh=auto_refresh, live_reload=live_reload)
             return 0
         except Exception as e:
             print(f"\n  Error: {e}")
@@ -523,6 +687,9 @@ def main():
             service=getattr(args, "service", None),
             analyze=getattr(args, "analyze", False),
         )
+
+    if args.command == "context-for":
+        return _handle_context_for(args)
 
     if args.command == "pkml":
         return handle_pkml_command(args)
