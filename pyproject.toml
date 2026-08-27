@@ -45,10 +45,13 @@ Homepage = "https://github.com/benneberg/contextcompiler"
 Repository = "https://github.com/benneberg/contextcompiler"
 Issues = "https://github.com/benneberg/contextcompiler/issues"
 
+[tool.setuptools]
+package-dir = { "" = "." }
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ccc", "ccc.*"]
-
+namespaces = false
 
 [tool.setuptools.package-data]
 ccc = ["py.typed"]
