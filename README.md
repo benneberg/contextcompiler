@@ -1,6 +1,11 @@
 # CCC — Code Context Compiler
 
-**A deterministic intermediate representation of your codebase, optimized for AI.**
+> **A deterministic intermediate representation of your codebase, optimized for AI.**
+
+[![CI Status](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+---
 
 CCC sits between raw code and LLMs. It scans your repositories and produces structured,
 queryable artifacts that give AI tools precise, grounded context — without flooding
