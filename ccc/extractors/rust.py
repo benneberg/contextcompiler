@@ -13,13 +13,19 @@ pub items only — implementation details stay private. Route macros
 """
 
 import re
-import tomllib
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore
+    except ImportError:
+        tomllib = None  # type: ignore
+
 from .base import BaseExtractor, ExtractionResult, ExtractedSymbol
 from ..utils.files import safe_read_text, should_skip_path
-
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
 
