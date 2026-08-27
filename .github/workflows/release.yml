@@ -17,12 +17,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[all]"
-          pip install pytest
+          pip install ".[all]"
+          pip install -r tests/requirements.txt
 
       - name: Run tests
         run: pytest tests/ -q
@@ -77,5 +78,5 @@ jobs:
           name: python-package
           path: dist/
 
-      - name: Publish to PyPI
+      - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
