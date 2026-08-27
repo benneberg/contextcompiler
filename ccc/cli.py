@@ -7,7 +7,7 @@ from . import VERSION
 from .config import get_default_config, load_config, deep_merge
 from .security.manager import SecurityManager
 from .utils.files import safe_read_text
-from .workspace.__init__workspace import WorkspaceManifest, WorkspaceQuery, ConflictDetector
+from .workspace import WorkspaceManifest, WorkspaceQuery, ConflictDetector
 from .doctor import DiagnosticTool
 from .watch import watch_mode
 from .generator import LLMContextGenerator
