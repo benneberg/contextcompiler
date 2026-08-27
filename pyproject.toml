@@ -46,7 +46,9 @@ Repository = "https://github.com/benneberg/contextcompiler"
 Issues = "https://github.com/benneberg/contextcompiler/issues"
 
 [tool.setuptools.packages.find]
-include = ["ccc*"]
+where = ["."]
+include = ["ccc", "ccc.*"]
+
 
 [tool.setuptools.package-data]
 ccc = ["py.typed"]
