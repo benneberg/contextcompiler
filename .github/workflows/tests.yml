@@ -38,8 +38,15 @@ jobs:
         run: |
           pytest tests/ \
             --cov=ccc \
+            --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml
+
+      - name: Verify coverage file
+        if: matrix.python-version == '3.12'
+        run: |
+          test -f coverage.xml
+          ls -lh coverage.xml
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
