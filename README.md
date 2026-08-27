@@ -2,7 +2,7 @@
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
 
-[![CI Status](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
+[![CI Status](https://github.com/benneberg/contextcompiler/actions/workflows/tests.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
