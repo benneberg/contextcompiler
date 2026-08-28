@@ -2,10 +2,12 @@
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
 
-[![CI Status](https://github.com/benneberg/contextcompiler/actions/workflows/tests.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
+[![CI](https://github.com/benneberg/contextcompiler/actions/workflows/tests.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
+[![PyPI](https://img.shields.io/pypi/v/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
+[![Python](https://img.shields.io/pypi/pyversions/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
----
+**Status:** Alpha (0.1.x) — core generation is solid; multi-repo UI and some extractors are still evolving.
 
 CCC sits between raw code and LLMs. It scans your repositories and produces structured,
 queryable artifacts that give AI tools precise, grounded context — without flooding
@@ -18,7 +20,6 @@ ccc inspect src/auth.py    # debug what CCC extracted from a file
 ccc context-for "add webm support"  # assemble task-specific context
 ccc workspace serve        # open browser UI for multi-repo workspaces
 ```
-
 ---
 
 ## The Core Idea
