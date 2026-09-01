@@ -2,10 +2,13 @@
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
 
-[![CI](https://github.com/benneberg/contextcompiler/actions/workflows/tests.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions)
+[![CI](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/benneberg/contextcompiler/branch/main/graph/badge.svg)](https://codecov.io/gh/benneberg/contextcompiler)
 [![PyPI](https://img.shields.io/pypi/v/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
 [![Python](https://img.shields.io/pypi/pyversions/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
 **Status:** Alpha (0.1.x) — core generation is solid; multi-repo UI and some extractors are still evolving.
 
