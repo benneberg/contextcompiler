@@ -248,15 +248,44 @@ Examples:
         help="Path to workspace root with ccc-workspace.yml (auto-detected if not specified)",
     )
 
-    parser.add_argument("path", nargs="?", default=".")
-    parser.add_argument("--quick-update", "-q", action="store_true")
-    parser.add_argument("--force", "-f", action="store_true")
-    parser.add_argument("--watch", action="store_true")
-    parser.add_argument("--with-summaries", action="store_true")
-    parser.add_argument("--doctor", action="store_true")
-    parser.add_argument("--security-status", action="store_true")
-    parser.add_argument("--output", "-o")
-    parser.add_argument("--config", "-c")
+    parser.add_argument(
+        "path", nargs="?", default=".",
+        help="Path to the repository root to analyse (default: current directory)",
+    )
+    parser.add_argument(
+        "--quick-update", "-q", action="store_true",
+        help="Skip unchanged files using content hashes — faster incremental runs",
+    )
+    parser.add_argument(
+        "--force", "-f", action="store_true",
+        help="Regenerate all artifacts even if they appear up-to-date",
+    )
+    parser.add_argument(
+        "--watch", action="store_true",
+        help="Watch for file changes and regenerate context automatically",
+    )
+    parser.add_argument(
+        "--with-summaries", action="store_true",
+        help="Include AI-generated per-file summaries (requires an AI provider key)",
+    )
+    parser.add_argument(
+        "--doctor", action="store_true",
+        help="Run diagnostic checks and report issues without generating context",
+    )
+    parser.add_argument(
+        "--security-status", action="store_true",
+        help="Print the current security mode and redaction settings, then exit",
+    )
+    parser.add_argument(
+        "--output", "-o",
+        metavar="DIR",
+        help="Override the output directory for generated artifacts (default: .llm-context/)",
+    )
+    parser.add_argument(
+        "--config", "-c",
+        metavar="FILE",
+        help="Path to a ccc config file (default: .llm-context/config.yml in the repo root)",
+    )
     parser.add_argument("--version", "-v", action="version", version=f"ccc {VERSION}")
     parser.add_argument("--quiet", action="store_true", help="Suppress all output except warnings and errors")
     parser.add_argument("--verbose", action="store_true", help="Enable debug-level output")
