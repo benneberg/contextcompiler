@@ -2,7 +2,7 @@
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
 
-[![CI](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml)
+[![CI](https://github.com/benneberg/contextcompiler/.github/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/.github/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/benneberg/contextcompiler/branch/main/graph/badge.svg)](https://codecov.io/gh/benneberg/contextcompiler)
 [![PyPI](https://img.shields.io/pypi/v/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
 [![Python](https://img.shields.io/pypi/pyversions/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
