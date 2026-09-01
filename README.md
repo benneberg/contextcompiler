@@ -1,7 +1,6 @@
 # CCC — Code Context Compiler
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
-# CCC — Code Context Compiler
 
 [![CI](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12-3776AB.svg)](https://www.python.org/)
