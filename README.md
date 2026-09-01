@@ -1,13 +1,14 @@
 # CCC — Code Context Compiler
 
 > **A deterministic intermediate representation of your codebase, optimized for AI.**
+# CCC — Code Context Compiler
 
-[![CI](https://github.com/benneberg/contextcompiler/action/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/action/workflows/ci.yml)
+[![CI](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/benneberg/contextcompiler/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12-3776AB.svg)](https://www.python.org/)
+[![PyPI version](https://img.shields.io/pypi/v/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![codecov](https://codecov.io/gh/benneberg/contextcompiler/branch/main/graph/badge.svg)](https://codecov.io/gh/benneberg/contextcompiler)
-[![PyPI](https://img.shields.io/pypi/v/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
-[![Python](https://img.shields.io/pypi/pyversions/ccc-contextcompiler.svg)](https://pypi.org/project/ccc-contextcompiler/)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)]
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
 
