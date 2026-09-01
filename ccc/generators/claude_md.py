@@ -318,11 +318,11 @@ class ClaudeMdEnhancer:
             path = self.root / config_file
             if path.exists():
                 content = (safe_read_text(path) or "").lower()
-                if "sqlalchemy" in content:
+                if "sqlalchemy" in content and "SQLAlchemy" not in orms:
                     orms.append("SQLAlchemy")
-                if "django" in content:
+                if "django" in content and "Django ORM" not in orms:
                     orms.append("Django ORM")
-                if "tortoise" in content:
+                if "tortoise" in content and "Tortoise ORM" not in orms:
                     orms.append("Tortoise ORM")
 
         package_json = self.root / "package.json"
