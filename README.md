@@ -10,7 +10,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
-**Status:** Alpha (0.1.x) — core generation is solid; multi-repo UI and some extractors are still evolving.
 
 CCC sits between raw code and LLMs. It scans your repositories and produces structured,
 queryable artifacts that give AI tools precise, grounded context — without flooding
