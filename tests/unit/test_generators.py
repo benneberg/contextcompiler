@@ -64,7 +64,7 @@ def make_ts_project(tmp_path: Path) -> Path:
 
 
 # ── Type graph tests ──────────────────────────────────────────────────────────
-  class TestTypeGraphGeneration:
+class TestTypeGraphGeneration:
     @pytest.fixture(autouse=True)
     def setup(self, tmp_path):
         self.root = tmp_path
