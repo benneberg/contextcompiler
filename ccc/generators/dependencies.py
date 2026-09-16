@@ -115,16 +115,11 @@ class DependencyGenerator(BaseGenerator):
     def _analyze_js(self) -> Tuple[List[str], List[Path]]:
         lines = ["## JavaScript/TypeScript Imports", ""]
         source_files: List[Path] = []# Match normal ESM imports, side-effect imports, and require().
-
-+        # Examples:
-
-+        #   import { Foo } from "./foo"
-
-+        #   import Foo from "./foo"
-
-+        #   import "./styles.css"
-
-+        #   const x = require("./foo"
+        # Examples:
+        #   import { Foo } from "./foo"
+        #   import Foo from "./foo"
+        #   import "./styles.css"
+        #   const x = require("./foo"
         
         import_pattern = re.compile(
             r"""(?:import\s+(?:[\s\S]*?\s+from\s+)?|require\s*\()\s*['"](\.{1,2}/[^'"]+)['"]\)?""",
