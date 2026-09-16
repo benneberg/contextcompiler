@@ -1,4 +1,4 @@
-“”“Entry point detector — finds main files, servers, CLIs, and test suites.”””
+"""Entry point detector — finds main files, servers, CLIs, and test suites."""
 
 import json
 from pathlib import Path
@@ -8,7 +8,7 @@ from .base import BaseGenerator
 from ..file_index import FileIndex
 
 class EntryPointGenerator(BaseGenerator):
-“”“Detect application entry points from the file index.”””
+"""Detect application entry points from the file index."""
 
 def __init__(self, root: Path, config: dict, file_index: FileIndex):
     super().__init__(root, config)
