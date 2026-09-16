@@ -63,67 +63,71 @@ def make_ts_project(tmp_path: Path) -> Path:
 
 
 # ── Type graph tests ──────────────────────────────────────────────────────────
-
 class TestTypeGraphGeneration:
-
-    def setup_method(self):
-        self.tmp = tempfile.mkdtemp()
-        self.root = Path(self.tmp)
-        make_ts_project(self.root)
-
-        from ccc.file_index import FileIndex, EXCLUDE_DIRS
-        self.file_index = FileIndex(self.root, EXCLUDE_DIRS).build()
-
-        from ccc.generators.schemas import SchemaGenerator
-        self.gen = SchemaGenerator(self.root, {}, self.file_index)
-
     def test_type_graph_contains_defined_types(self):
         graph_json = self.gen.generate_type_graph()
         graph = json.loads(graph_json)
         types = graph["types"]
-        assert "VideoConfig" in types
-        assert "MediaType" in types
-        assert "ProcessingStatus" in types
+
+        assert "src/types.ts::VideoConfig" in types
+        assert "src/types.ts::MediaType" in types
+        assert "src/types.ts::ProcessingStatus" in types
+        assert "src/unrelated.ts::UnrelatedType" in types
 
     def test_type_graph_records_definition_file(self):
         graph = json.loads(self.gen.generate_type_graph())
-        vc = graph["types"]["VideoConfig"]
-        assert "types.ts" in vc["defined_in"]
+
+        vc = graph["types"]["src/types.ts::VideoConfig"]
+
+        assert vc["name"] == "VideoConfig"
+        assert vc["defined_in"] == "src/types.ts"
 
     def test_type_graph_records_used_in(self):
         graph = json.loads(self.gen.generate_type_graph())
-        vc = graph["types"]["VideoConfig"]
-        used = vc["used_in"]
-        # Both encoder.ts and thumbnail.ts import VideoConfig
-        assert any("encoder.ts" in u for u in used)
-        assert any("thumbnail.ts" in u for u in used)
+
+        vc = graph["types"]["src/types.ts::VideoConfig"]
+
+        assert sorted(vc["used_in"]) == [
+            "src/encoder.ts",
+            "src/thumbnail.ts",
+        ]
 
     def test_type_graph_no_self_reference(self):
         graph = json.loads(self.gen.generate_type_graph())
-        for name, info in graph["types"].items():
-            assert info["defined_in"] not in info["used_in"], (
-                f"{name} should not list its own file in used_in"
-            )
+
+        for identity, type_info in graph["types"].items():
+            assert type_info["defined_in"] not in type_info["used_in"]
 
     def test_type_graph_unimported_type_has_empty_used_in(self):
         graph = json.loads(self.gen.generate_type_graph())
-        # UnrelatedType is not imported by anyone
-        ut = graph["types"].get("UnrelatedType")
-        if ut:
-            assert ut["used_in"] == []
+
+        unrelated = graph["types"]["src/unrelated.ts::UnrelatedType"]
+
+        assert unrelated["used_in"] == []
 
     def test_type_graph_meta_fields(self):
         graph = json.loads(self.gen.generate_type_graph())
+
         assert "_meta" in graph
+        assert "generated" in graph["_meta"]
         assert "total_types" in graph["_meta"]
-        assert graph["_meta"]["total_types"] > 0
+        assert graph["_meta"]["total_types"] == 4
 
     def test_type_graph_records_kind(self):
         graph = json.loads(self.gen.generate_type_graph())
-        assert graph["types"]["VideoConfig"]["kind"] == "interface"
-        assert graph["types"]["MediaType"]["kind"] == "type"
-        assert graph["types"]["ProcessingStatus"]["kind"] == "enum"
 
+        assert (
+            graph["types"]["src/types.ts::VideoConfig"]["kind"]
+            == "interface"
+        )
+        assert (
+            graph["types"]["src/types.ts::ProcessingStatus"]["kind"]
+            == "enum"
+        )
+        assert (
+            graph["types"]["src/types.ts::MediaType"]["kind"]
+            == "type"
+        )
 
 # ── TypeScript extraction with used_in annotations ───────────────────────────
 
