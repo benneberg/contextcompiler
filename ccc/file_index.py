@@ -46,16 +46,16 @@ class FileIndex:
         self._by_ext = {}
 
         for dirpath, dirnames, filenames in os.walk(self.root):
-            # Prune excluded directories in-place so os.walk won't recurse into them
+            # Prune excluded directories in-place so os.walk won't recurse into them.
+            #
+            # Generated context is output, not repository source. In particular,
+            # .llm-context must never enter the shared source index because every
+            # generator consumes this index.
             dirnames[:] = [
                 d for d in dirnames
                 if d not in self.exclude_dirs
-                and not d.startswith(".")
-                or d in {".github", ".llm-context"}  # keep these
             ]
-            # Re-apply: simpler and correct
-            dirnames[:] = [d for d in dirnames if d not in self.exclude_dirs]
-
+           
             for name in filenames:
                 p = Path(dirpath) / name
 
