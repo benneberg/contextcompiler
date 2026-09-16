@@ -37,6 +37,14 @@ class SymbolIndexGenerator(BaseGenerator):
     def output_filename(self) -> str:
         return "symbol-index.json"
 
+    @staticmethod
+    def _symbol_key(name: str, rel_path: str) -> str:
+    """
+    Return a stable source-qualified symbol identity.
+    Human-readable names are not globally unique in a repository.
+    """
+    return f"{rel_path}::{name}"
+  
     def generate(self) -> Tuple[str, List[Path]]:
         symbols: Dict[str, dict] = {}
         source_files: List[Path] = []
@@ -101,7 +109,7 @@ class SymbolIndexGenerator(BaseGenerator):
 
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
-                    symbols[node.name] = {
+                    symbols[self._symbol_key(node.name, fi.rel_path)] = {
                         "file": fi.rel_path,
                         "line": node.lineno,
                         "kind": "class",
@@ -111,7 +119,7 @@ class SymbolIndexGenerator(BaseGenerator):
                         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                             if not item.name.startswith("_") or item.name == "__init__":
                                 key = f"{node.name}.{item.name}"
-                                symbols[key] = {
+                                symbols[self._symbol_key(key, fi.rel_path)] = {
                                     "file": fi.rel_path,
                                     "line": item.lineno,
                                     "kind": "method",
@@ -119,7 +127,7 @@ class SymbolIndexGenerator(BaseGenerator):
 
                 elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if not node.name.startswith("_"):
-                        symbols[node.name] = {
+                        symbols[self._symbol_key(node.name, fi.rel_path)] = {
                             "file": fi.rel_path,
                             "line": node.lineno,
                             "kind": "function",
@@ -169,7 +177,8 @@ class SymbolIndexGenerator(BaseGenerator):
                 for match in pattern.finditer(content):
                     name = match.group(1)
                     line = content[: match.start()].count("\n") + 1
-                    symbols[name] = {"file": fi.rel_path, "line": line, "kind": kind}
+                    key = self._symbol_key(name, fi.rel_path)
+                    symbols[key] = {"file": fi.rel_path, "line": line, "kind": kind}
 
             for method, path in route_pattern.findall(content):
                 key = f"{method.upper()} {path}"
