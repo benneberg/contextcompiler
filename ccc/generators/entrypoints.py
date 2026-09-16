@@ -53,8 +53,66 @@ class EntryPointGenerator(BaseGenerator):
                 if rel not in entry_points["cli_files"]:
                     entry_points["cli_files"].append(rel)
 
-        for test_dir in ["tests", "test", "__tests__", "spec"]:
-            if (self.root / test_dir).is_dir():
-                entry_points["test_suites"].append(test_dir)
+        # Detect test suites recursively rather than only at repository root.
 
-        return json.dumps(entry_points, indent=2), source_files
++        # This covers common JS/TS conventions such as:
+
++        #   src/foo.test.ts
+
++        #   src/foo.spec.tsx
+
++        #   packages/foo/__tests__/
+
++        # as well as traditional tests/, test/, and spec/ directories.
+
++        test_dirs = {"tests", "test", "__tests__", "spec"}
+
++        test_file_suffixes = (
+
++            ".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+
++            ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx",
+
++            "_test.py", "_test.go",
+
++        )
+
++
+
++        found_test_suites = set()
+
++        for fi in self.index.all_files():
+
++            if should_skip_path(fi.path):
+
++                continue
+
++
+
++            parts = Path(fi.rel_path).parts
+
++            if any(part in test_dirs for part in parts[:-1]):
+
++                found_test_suites.add(
+
++                    next(part for part in parts if part in test_dirs)
+
++                )
+
++
+
++            if fi.path.name.endswith(test_file_suffixes):
+
++                found_test_suites.add(str(Path(fi.rel_path).parent))
+
++
+
++        entry_points["test_suites"] = sorted(
+
++            suite for suite in found_test_suites if suite and suite != "."
+
++        )
+
+ 
+
+         return json.dumps(entry_points, indent=2), source_files
