@@ -39,11 +39,11 @@ class SymbolIndexGenerator(BaseGenerator):
 
     @staticmethod
     def _symbol_key(name: str, rel_path: str) -> str:
-    """
-    Return a stable source-qualified symbol identity.
-    Human-readable names are not globally unique in a repository.
-    """
-    return f"{rel_path}::{name}"
+        """
+        Return a stable source-qualified symbol identity.
+        Human-readable names are not globally unique in a repository.
+        """
+        return f"{rel_path}::{name}"
   
     def generate(self) -> Tuple[str, List[Path]]:
         symbols: Dict[str, dict] = {}
