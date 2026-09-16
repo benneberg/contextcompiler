@@ -138,7 +138,7 @@ def resolve_intent(
                 "name": name,
                 "tags": list(svc.tags),
                 "description": svc.description or "",
-                "type": svc.type or "",
+                "type": svc.service_type or "",
                 "depends_on": list(svc.depends_on),
                 "path": str(svc.path.relative_to(manifest.root)),
                 "has_context": (svc.path / ".llm-context").exists(),
